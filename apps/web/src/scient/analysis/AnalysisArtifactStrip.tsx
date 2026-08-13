@@ -10,7 +10,15 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { Download, ExternalLink, Image, LoaderCircle, Pin } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  ExternalLink,
+  Image,
+  LoaderCircle,
+  Pin,
+} from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   useEffect,
@@ -104,6 +112,7 @@ export function AnalysisArtifactStrip(props: {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<ArtifactDragPreview | null>(null);
   const [choiceMenu, setChoiceMenu] = useState<ArtifactChoiceMenu | null>(null);
+  const [expanded, setExpanded] = useState(true);
   const artifactDragRef = useRef<ArtifactDragState | null>(null);
   const suppressClickRef = useRef<AnalysisArtifact["artifactId"] | null>(null);
   const previousBodyCursorRef = useRef<string | null>(null);
@@ -118,6 +127,7 @@ export function AnalysisArtifactStrip(props: {
     >(),
   );
   const followedRunIdRef = useRef(props.run.receipt.runId);
+  const expandedRunIdRef = useRef(props.run.receipt.runId);
   const cards = useMemo(() => {
     let thumbnailIndex = 0;
     return props.run.artifacts.map((artifact) => {
@@ -155,6 +165,12 @@ export function AnalysisArtifactStrip(props: {
     },
     [],
   );
+
+  useEffect(() => {
+    if (expandedRunIdRef.current === props.run.receipt.runId) return;
+    expandedRunIdRef.current = props.run.receipt.runId;
+    setExpanded(true);
+  }, [props.run.receipt.runId]);
 
   const restoreDragCursor = () => {
     if (previousBodyCursorRef.current === null) return;
@@ -204,6 +220,16 @@ export function AnalysisArtifactStrip(props: {
         }
         applyPreviewServerSnapshot(props.threadRef, navigation.value);
         rememberPreviewUrl(props.threadRef, url);
+        const miniPlayer = selectThreadPreviewMiniPlayer(
+          usePreviewMiniPlayerStore.getState().byThreadKey,
+          props.threadRef,
+        );
+        if (miniPlayer?.tabId === tabId && miniPlayer.imageSource) {
+          usePreviewMiniPlayerStore.getState().open(props.threadRef, tabId, undefined, {
+            url,
+            alt: artifact.label,
+          });
+        }
         followedTabsRef.current.set(tabId, {
           artifactId: artifact.artifactId,
           representationId: representation.representationId,
@@ -282,7 +308,10 @@ export function AnalysisArtifactStrip(props: {
       if (mode === "pin") {
         usePreviewMiniPlayerStore
           .getState()
-          .open(props.threadRef, result.value.tabId, initialPosition);
+          .open(props.threadRef, result.value.tabId, initialPosition, {
+            url,
+            alt: artifact.label,
+          });
       } else {
         useRightPanelStore.getState().openBrowser(props.threadRef, result.value.tabId);
       }
@@ -347,18 +376,12 @@ export function AnalysisArtifactStrip(props: {
     event.stopPropagation();
     if (cancelled) return;
 
-    const hit = document.elementFromPoint(event.clientX, event.clientY);
-    const chatColumn = hit?.closest<HTMLElement>("[data-chat-column-maximized-away]");
-    const host = chatColumn?.parentElement;
-    if (!chatColumn || !(host instanceof HTMLElement)) return;
-    const hostRect = host.getBoundingClientRect();
     const current = selectThreadPreviewMiniPlayer(
       usePreviewMiniPlayerStore.getState().byThreadKey,
       props.threadRef,
     );
     const initialPosition = floatingArtifactPositionForDrop({
       clientPoint: { x: event.clientX, y: event.clientY },
-      hostOrigin: { x: hostRect.left, y: hostRect.top },
       playerSize: current?.size ?? PREVIEW_MINI_PLAYER_DEFAULT_SIZE,
     });
     void presentArtifact(drag.artifact, drag.representation, "pin", initialPosition);
@@ -384,86 +407,105 @@ export function AnalysisArtifactStrip(props: {
   return (
     <div className="border-t border-border bg-background" aria-label="Analysis figures">
       <div className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
-        <span className="font-medium text-foreground">
-          {props.run.artifacts.length === 1 ? "1 figure" : `${props.run.artifacts.length} figures`}
-        </span>
+        <button
+          type="button"
+          className="flex min-w-0 items-center gap-1.5 rounded-sm font-medium text-foreground outline-none hover:text-foreground/80 focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={expanded}
+          onClick={() => {
+            setChoiceMenu(null);
+            setExpanded((value) => !value);
+          }}
+        >
+          {expanded ? (
+            <ChevronDown className="size-3.5" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="size-3.5" aria-hidden="true" />
+          )}
+          <span>
+            {props.run.artifacts.length === 1
+              ? "1 figure"
+              : `${props.run.artifacts.length} figures`}
+          </span>
+        </button>
         <span className="text-muted-foreground" role="status">
           {STATUS_LABELS[props.status]}
         </span>
       </div>
-      <div className="flex gap-2 overflow-x-auto border-t border-border/60 p-2">
-        {cards.map((card) => {
-          const thumbnailUrl =
-            card.thumbnailIndex === null ? null : (thumbnailUrls[card.thumbnailIndex] ?? null);
-          const openPending = pendingAction?.endsWith(`:${card.artifact.artifactId}`) ?? false;
-          const downloadPending = pendingAction === `download:${card.artifact.artifactId}`;
-          return (
-            <article
-              key={card.artifact.artifactId}
-              className="w-36 shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted/20"
-            >
-              <button
-                type="button"
-                className="block w-full cursor-pointer text-left outline-none hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
-                disabled={(!card.preview && !card.interactive) || pendingAction !== null}
-                onPointerDown={(event) =>
-                  beginArtifactDrag(event, card.artifact, card.preview, thumbnailUrl)
-                }
-                onPointerMove={moveArtifactDrag}
-                onPointerUp={(event) => endArtifactDrag(event)}
-                onPointerCancel={(event) => endArtifactDrag(event, true)}
-                onClick={(event) => {
-                  if (suppressClickRef.current === card.artifact.artifactId) {
-                    suppressClickRef.current = null;
-                    return;
-                  }
-                  setChoiceMenu({
-                    artifactId: card.artifact.artifactId,
-                    anchor: event.currentTarget,
-                  });
-                }}
-                aria-label={`Choose how to open ${card.artifact.label}`}
-                aria-haspopup="menu"
-                aria-expanded={choiceMenu?.artifactId === card.artifact.artifactId}
-                title={card.preview ? "Choose view · drag into chat to float" : "Choose view"}
+      {expanded ? (
+        <div className="flex gap-2 overflow-x-auto border-t border-border/60 p-2">
+          {cards.map((card) => {
+            const thumbnailUrl =
+              card.thumbnailIndex === null ? null : (thumbnailUrls[card.thumbnailIndex] ?? null);
+            const openPending = pendingAction?.endsWith(`:${card.artifact.artifactId}`) ?? false;
+            const downloadPending = pendingAction === `download:${card.artifact.artifactId}`;
+            return (
+              <article
+                key={card.artifact.artifactId}
+                className="w-36 shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted/20"
               >
-                <span className="flex h-20 items-center justify-center overflow-hidden bg-background">
-                  {openPending ? (
-                    <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
-                  ) : thumbnailUrl ? (
-                    <img
-                      src={thumbnailUrl}
-                      alt=""
-                      loading="lazy"
-                      draggable={false}
-                      className="size-full object-contain"
-                    />
-                  ) : (
-                    <Image className="size-5 text-muted-foreground" aria-hidden="true" />
-                  )}
-                </span>
-                <span className="block truncate border-t border-border/60 px-2 py-1.5 text-xs font-medium">
-                  {card.artifact.label}
-                </span>
-              </button>
-              {card.native ? (
-                <div className="flex justify-end border-t border-border/60 px-1 py-0.5">
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    disabled={pendingAction !== null}
-                    onClick={() => void downloadNative(card.artifact)}
-                    aria-label={`Download native ${card.artifact.label}`}
-                    title="Download MATLAB figure"
-                  >
-                    {downloadPending ? <LoaderCircle className="animate-spin" /> : <Download />}
-                  </Button>
-                </div>
-              ) : null}
-            </article>
-          );
-        })}
-      </div>
+                <button
+                  type="button"
+                  className="block w-full cursor-pointer text-left outline-none hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+                  disabled={(!card.preview && !card.interactive) || pendingAction !== null}
+                  onPointerDown={(event) =>
+                    beginArtifactDrag(event, card.artifact, card.preview, thumbnailUrl)
+                  }
+                  onPointerMove={moveArtifactDrag}
+                  onPointerUp={(event) => endArtifactDrag(event)}
+                  onPointerCancel={(event) => endArtifactDrag(event, true)}
+                  onClick={(event) => {
+                    if (suppressClickRef.current === card.artifact.artifactId) {
+                      suppressClickRef.current = null;
+                      return;
+                    }
+                    setChoiceMenu({
+                      artifactId: card.artifact.artifactId,
+                      anchor: event.currentTarget,
+                    });
+                  }}
+                  aria-label={`Choose how to open ${card.artifact.label}`}
+                  aria-haspopup="menu"
+                  aria-expanded={choiceMenu?.artifactId === card.artifact.artifactId}
+                  title={card.preview ? "Choose view · drag anywhere to float" : "Choose view"}
+                >
+                  <span className="flex h-20 items-center justify-center overflow-hidden bg-background">
+                    {openPending ? (
+                      <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+                    ) : thumbnailUrl ? (
+                      <img
+                        src={thumbnailUrl}
+                        alt=""
+                        loading="lazy"
+                        draggable={false}
+                        className="size-full object-contain"
+                      />
+                    ) : (
+                      <Image className="size-5 text-muted-foreground" aria-hidden="true" />
+                    )}
+                  </span>
+                  <span className="block truncate border-t border-border/60 px-2 py-1.5 text-xs font-medium">
+                    {card.artifact.label}
+                  </span>
+                </button>
+                {card.native ? (
+                  <div className="flex justify-end border-t border-border/60 px-1 py-0.5">
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      disabled={pendingAction !== null}
+                      onClick={() => void downloadNative(card.artifact)}
+                      aria-label={`Download native ${card.artifact.label}`}
+                      title="Download MATLAB figure"
+                    >
+                      {downloadPending ? <LoaderCircle className="animate-spin" /> : <Download />}
+                    </Button>
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      ) : null}
       <Menu
         open={choiceCard !== null}
         onOpenChange={(open) => {

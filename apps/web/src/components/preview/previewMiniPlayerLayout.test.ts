@@ -3,12 +3,36 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   clampPreviewMiniPlayerPosition,
   clampPreviewMiniPlayerSize,
+  nextPreviewMiniPlayerImageZoom,
+  PREVIEW_MINI_PLAYER_DEFAULT_SIZE,
+  PREVIEW_MINI_PLAYER_DEFAULT_TOP,
   PREVIEW_MINI_PLAYER_EDGE_GAP,
+  resolvePreviewMiniPlayerDefaultPosition,
   resizePreviewMiniPlayerRect,
 } from "./previewMiniPlayerLayout";
 
 describe("clampPreviewMiniPlayerPosition", () => {
-  it("keeps a dragged player within the chat viewport", () => {
+  it("opens at a useful default size", () => {
+    expect(PREVIEW_MINI_PLAYER_DEFAULT_SIZE).toEqual({ width: 400, height: 260 });
+  });
+
+  it("opens centered across the upper portion of the app window", () => {
+    expect(
+      resolvePreviewMiniPlayerDefaultPosition(
+        { width: 1_200, height: 800 },
+        PREVIEW_MINI_PLAYER_DEFAULT_SIZE,
+      ),
+    ).toEqual({ x: 400, y: PREVIEW_MINI_PLAYER_DEFAULT_TOP });
+  });
+
+  it("maps smooth trackpad deltas into bounded image zoom", () => {
+    expect(nextPreviewMiniPlayerImageZoom(1, -20)).toBeGreaterThan(1);
+    expect(nextPreviewMiniPlayerImageZoom(1, 20)).toBe(1);
+    expect(nextPreviewMiniPlayerImageZoom(4.9, -1_000)).toBe(5);
+    expect(nextPreviewMiniPlayerImageZoom(Number.NaN, 0)).toBe(1);
+  });
+
+  it("keeps a dragged player within the app viewport", () => {
     expect(
       clampPreviewMiniPlayerPosition(
         { x: 900, y: -40 },
@@ -34,7 +58,7 @@ describe("clampPreviewMiniPlayerPosition", () => {
     });
   });
 
-  it("keeps the player above a growing composer inset", () => {
+  it("can keep the player above a reserved bottom inset", () => {
     expect(
       clampPreviewMiniPlayerPosition(
         { x: 500, y: 448 },
@@ -50,13 +74,13 @@ describe("clampPreviewMiniPlayerPosition", () => {
 });
 
 describe("clampPreviewMiniPlayerSize", () => {
-  it("allows resizing within the available chat viewport", () => {
+  it("allows resizing within the available viewport", () => {
     expect(
       clampPreviewMiniPlayerSize({ width: 520, height: 360 }, { width: 1_000, height: 700 }, 120),
     ).toEqual({ width: 520, height: 360 });
   });
 
-  it("bounds oversized players above the composer", () => {
+  it("bounds oversized players above a reserved bottom inset", () => {
     expect(
       clampPreviewMiniPlayerSize(
         { width: 2_000, height: 2_000 },
@@ -107,7 +131,7 @@ describe("resizePreviewMiniPlayerRect", () => {
     ).toEqual({ position: { x: 200, y: 160 }, size: { width: 320, height: 260 } });
   });
 
-  it("honors viewport, composer, and minimum-size bounds from every direction", () => {
+  it("honors viewport, reserved-inset, and minimum-size bounds from every direction", () => {
     expect(
       resizePreviewMiniPlayerRect({
         rect,

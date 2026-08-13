@@ -35,6 +35,7 @@ describe("previewMiniPlayerStore", () => {
       tabId: "tab-b",
       position: { x: 24, y: 48 },
       size: null,
+      imageSource: null,
     });
   });
 
@@ -49,6 +50,7 @@ describe("previewMiniPlayerStore", () => {
       tabId: "tab-b",
       position: null,
       size: null,
+      imageSource: null,
     });
   });
 
@@ -67,7 +69,12 @@ describe("previewMiniPlayerStore", () => {
 
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
-    ).toEqual({ tabId: "tab-a", position: { x: 180, y: 96 }, size: null });
+    ).toEqual({
+      tabId: "tab-a",
+      position: { x: 180, y: 96 },
+      size: null,
+      imageSource: null,
+    });
   });
 
   it("updates resize position and size atomically", () => {
@@ -89,6 +96,32 @@ describe("previewMiniPlayerStore", () => {
       tabId: "tab-a",
       position: { x: 80, y: 64 },
       size: { width: 520, height: 360 },
+      imageSource: null,
+    });
+  });
+
+  it("updates a generic image source without losing the card layout", () => {
+    usePreviewMiniPlayerStore
+      .getState()
+      .open(
+        refA,
+        "tab-a",
+        { x: 90, y: 70 },
+        { url: "https://example.test/first.png", alt: "First image" },
+      );
+    usePreviewMiniPlayerStore.getState().resize(refA, "tab-a", { width: 500, height: 340 });
+    usePreviewMiniPlayerStore.getState().open(refA, "tab-a", undefined, {
+      url: "https://example.test/second.png",
+      alt: "Updated image",
+    });
+
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toEqual({
+      tabId: "tab-a",
+      position: { x: 90, y: 70 },
+      size: { width: 500, height: 340 },
+      imageSource: { url: "https://example.test/second.png", alt: "Updated image" },
     });
   });
 });

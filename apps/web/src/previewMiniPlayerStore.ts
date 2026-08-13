@@ -17,10 +17,16 @@ export interface PreviewMiniPlayerRect {
   readonly size: PreviewMiniPlayerSize;
 }
 
+export interface PreviewMiniPlayerImageSource {
+  readonly url: string;
+  readonly alt: string;
+}
+
 export interface PreviewMiniPlayerState {
   readonly tabId: string;
   readonly position: PreviewMiniPlayerPosition | null;
   readonly size: PreviewMiniPlayerSize | null;
+  readonly imageSource: PreviewMiniPlayerImageSource | null;
 }
 
 interface PreviewMiniPlayerStoreState {
@@ -29,6 +35,7 @@ interface PreviewMiniPlayerStoreState {
     ref: ScopedThreadRef,
     tabId: string,
     position?: PreviewMiniPlayerPosition,
+    imageSource?: PreviewMiniPlayerImageSource,
   ) => void;
   readonly close: (ref: ScopedThreadRef) => void;
   readonly move: (ref: ScopedThreadRef, tabId: string, position: PreviewMiniPlayerPosition) => void;
@@ -39,14 +46,17 @@ interface PreviewMiniPlayerStoreState {
 
 export const usePreviewMiniPlayerStore = create<PreviewMiniPlayerStoreState>()((set) => ({
   byThreadKey: {},
-  open: (ref, tabId, position) =>
+  open: (ref, tabId, position, imageSource) =>
     set((state) => {
       const threadKey = scopedThreadKey(ref);
       const current = state.byThreadKey[threadKey];
+      const nextImageSource = imageSource ?? null;
       if (
         current?.tabId === tabId &&
         (position === undefined ||
-          (current.position?.x === position.x && current.position.y === position.y))
+          (current.position?.x === position.x && current.position.y === position.y)) &&
+        current.imageSource?.url === nextImageSource?.url &&
+        current.imageSource?.alt === nextImageSource?.alt
       ) {
         return state;
       }
@@ -57,6 +67,7 @@ export const usePreviewMiniPlayerStore = create<PreviewMiniPlayerStoreState>()((
             tabId,
             position: position ?? current?.position ?? null,
             size: current?.size ?? null,
+            imageSource: nextImageSource,
           },
         },
       };

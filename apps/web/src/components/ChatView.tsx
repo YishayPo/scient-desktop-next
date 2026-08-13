@@ -6760,7 +6760,6 @@ function ChatViewContent(props: ChatViewProps) {
                 key={`${activeThreadKey}:${activePreviewMiniPlayer.tabId}`}
                 threadRef={activeThreadRef}
                 tabId={activePreviewMiniPlayer.tabId}
-                bottomInset={isDraftHeroState ? 0 : composerOverlayHeight}
               />
             ) : null}
 

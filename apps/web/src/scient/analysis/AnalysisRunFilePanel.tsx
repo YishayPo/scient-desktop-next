@@ -729,6 +729,16 @@ export function AnalysisRunFilePanel(props: AnalysisRunFilePanelProps) {
                 ? "Set up this folder as a Scient project to run"
                 : runtimeStatusText}
         </span>
+        {runtimeReady ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            aria-expanded={showRuntimeDetails}
+            onClick={() => setShowRuntimeDetails((value) => !value)}
+          >
+            Details
+          </Button>
+        ) : null}
         {runs.length > 1 ? (
           <select
             className="max-w-44 rounded-md border border-input bg-background px-2 py-1 text-xs"
@@ -760,6 +770,78 @@ export function AnalysisRunFilePanel(props: AnalysisRunFilePanelProps) {
           {expanded ? <ChevronDown /> : <ChevronUp />}
         </Button>
       </div>
+
+      {runtimeReady && showRuntimeDetails ? (
+        <div className="space-y-2 border-t border-border px-3 py-2 text-[11px]">
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+            <dt className="text-muted-foreground">Working folder</dt>
+            <dd className="truncate font-mono" title={props.cwd}>
+              {props.cwd}
+            </dd>
+            <dt className="text-muted-foreground">Executable</dt>
+            <dd className="truncate font-mono" title={profile?.executablePath ?? undefined}>
+              {profile?.executablePath}
+            </dd>
+            <dt className="text-muted-foreground">Release</dt>
+            <dd>{profile?.verification?.release ?? profile?.version ?? "Not reported"}</dd>
+            <dt className="text-muted-foreground">Architecture</dt>
+            <dd>{profile?.verification?.architecture ?? "Not checked"}</dd>
+            <dt className="text-muted-foreground">Java</dt>
+            <dd>
+              {profile?.verification?.javaAvailable === null || !profile?.verification
+                ? "Not checked"
+                : profile.verification.javaAvailable
+                  ? (profile.verification.javaVersion ?? "Available")
+                  : "Unavailable"}
+            </dd>
+            <dt className="text-muted-foreground">Toolboxes</dt>
+            <dd>
+              {profile?.verification
+                ? `${profile.verification.toolboxes.length} detected`
+                : "Not checked"}
+            </dd>
+          </dl>
+          <div className="flex flex-wrap gap-2 border-t border-border/60 pt-2">
+            <Input
+              className="min-w-48 flex-1"
+              size="sm"
+              value={runtimePath}
+              placeholder={`Path to ${props.runtimeLabel} executable`}
+              onValueChange={setRuntimePath}
+              aria-label={`${props.runtimeLabel} executable path`}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={operation !== null || activeRun !== null}
+              onClick={handleConfigure}
+            >
+              {operation === "configure" ? <LoaderCircle className="animate-spin" /> : null}
+              Use path
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              disabled={operation !== null || activeRun !== null}
+              onClick={() => refreshRuntime()}
+              aria-label={`Scan for ${props.runtimeLabel} again`}
+            >
+              <RotateCcw />
+            </Button>
+            {verificationReady ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={operation !== null || activeRun !== null}
+                onClick={handleVerify}
+              >
+                {operation === "verify" ? <LoaderCircle className="animate-spin" /> : null}
+                Verify again
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {artifactRun && artifactStatus && artifactRun.localStorage.status === "retained" ? (
         <AnalysisArtifactStrip
@@ -827,108 +909,25 @@ export function AnalysisRunFilePanel(props: AnalysisRunFilePanelProps) {
                 it only when you press Run file.
               </p>
             </div>
-          ) : (
+          ) : !verificationReady ? (
             <div className="border-b border-border px-3 py-2 text-xs">
               <div className="flex items-start gap-2">
                 <span className="min-w-0 flex-1 leading-relaxed text-muted-foreground">
-                  {verificationReady
-                    ? (profile?.verification?.detail ?? `${props.runtimeLabel} is ready.`)
-                    : (profile?.verification?.detail ??
-                      `${props.runtimeLabel} was found. You can run now or verify the installation first.`)}
+                  {profile?.verification?.detail ??
+                    `${props.runtimeLabel} was found. You can run now or verify the installation first.`}
                 </span>
-                {!verificationReady ? (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={operation !== null || activeRun !== null}
-                    onClick={handleVerify}
-                  >
-                    {operation === "verify" ? <LoaderCircle className="animate-spin" /> : null}
-                    {profile?.verification ? "Verify again" : "Verify"}
-                  </Button>
-                ) : null}
                 <Button
                   size="xs"
-                  variant="ghost"
-                  aria-expanded={showRuntimeDetails}
-                  onClick={() => setShowRuntimeDetails((value) => !value)}
+                  variant="outline"
+                  disabled={operation !== null || activeRun !== null}
+                  onClick={handleVerify}
                 >
-                  Details
+                  {operation === "verify" ? <LoaderCircle className="animate-spin" /> : null}
+                  {profile?.verification ? "Verify again" : "Verify"}
                 </Button>
               </div>
-              {showRuntimeDetails ? (
-                <div className="mt-2 space-y-2 rounded-md bg-muted/40 p-2 text-[11px]">
-                  <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
-                    <dt className="text-muted-foreground">Working folder</dt>
-                    <dd className="truncate font-mono" title={props.cwd}>
-                      {props.cwd}
-                    </dd>
-                    <dt className="text-muted-foreground">Executable</dt>
-                    <dd className="truncate font-mono" title={profile?.executablePath ?? undefined}>
-                      {profile?.executablePath}
-                    </dd>
-                    <dt className="text-muted-foreground">Release</dt>
-                    <dd>{profile?.verification?.release ?? profile?.version ?? "Not reported"}</dd>
-                    <dt className="text-muted-foreground">Architecture</dt>
-                    <dd>{profile?.verification?.architecture ?? "Not checked"}</dd>
-                    <dt className="text-muted-foreground">Java</dt>
-                    <dd>
-                      {profile?.verification?.javaAvailable === null || !profile?.verification
-                        ? "Not checked"
-                        : profile.verification.javaAvailable
-                          ? (profile.verification.javaVersion ?? "Available")
-                          : "Unavailable"}
-                    </dd>
-                    <dt className="text-muted-foreground">Toolboxes</dt>
-                    <dd>
-                      {profile?.verification
-                        ? `${profile.verification.toolboxes.length} detected`
-                        : "Not checked"}
-                    </dd>
-                  </dl>
-                  <div className="flex flex-wrap gap-2 border-t border-border/60 pt-2">
-                    <Input
-                      className="min-w-48 flex-1"
-                      size="sm"
-                      value={runtimePath}
-                      placeholder={`Path to ${props.runtimeLabel} executable`}
-                      onValueChange={setRuntimePath}
-                      aria-label={`${props.runtimeLabel} executable path`}
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={operation !== null || activeRun !== null}
-                      onClick={handleConfigure}
-                    >
-                      {operation === "configure" ? <LoaderCircle className="animate-spin" /> : null}
-                      Use path
-                    </Button>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      disabled={operation !== null || activeRun !== null}
-                      onClick={() => refreshRuntime()}
-                      aria-label={`Scan for ${props.runtimeLabel} again`}
-                    >
-                      <RotateCcw />
-                    </Button>
-                    {verificationReady ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={operation !== null || activeRun !== null}
-                        onClick={handleVerify}
-                      >
-                        {operation === "verify" ? <LoaderCircle className="animate-spin" /> : null}
-                        Verify again
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
             </div>
-          )}
+          ) : null}
           {!projectNotInitialized && selectedLiveRun ? (
             <RunOutputView
               run={selectedLiveRun}

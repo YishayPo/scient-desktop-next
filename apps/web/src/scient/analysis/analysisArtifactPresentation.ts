@@ -107,11 +107,10 @@ export function canFollowArtifactInTab(
 /** Center a newly floated figure on the point where the user dropped its thumbnail. */
 export function floatingArtifactPositionForDrop(input: {
   readonly clientPoint: { readonly x: number; readonly y: number };
-  readonly hostOrigin: { readonly x: number; readonly y: number };
   readonly playerSize: { readonly width: number; readonly height: number };
 }): { readonly x: number; readonly y: number } {
   return {
-    x: Math.round(input.clientPoint.x - input.hostOrigin.x - input.playerSize.width / 2),
-    y: Math.round(input.clientPoint.y - input.hostOrigin.y - input.playerSize.height / 2),
+    x: Math.round(input.clientPoint.x - input.playerSize.width / 2),
+    y: Math.round(input.clientPoint.y - input.playerSize.height / 2),
   };
 }

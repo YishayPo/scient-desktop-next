@@ -215,13 +215,12 @@ describe("analysis artifact presentation", () => {
     expect(canFollowArtifactInTab(undefined, lastArtifactUrl)).toBe(false);
   });
 
-  it("centers a floated figure on its drop point in the preview host", () => {
+  it("centers a floated figure on its drop point in the app window", () => {
     expect(
       floatingArtifactPositionForDrop({
         clientPoint: { x: 620, y: 390 },
-        hostOrigin: { x: 20, y: 40 },
         playerSize: { width: 320, height: 200 },
       }),
-    ).toEqual({ x: 440, y: 250 });
+    ).toEqual({ x: 460, y: 290 });
   });
 });
