@@ -9,12 +9,13 @@ import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
+import { selectPreviewImageSource, usePreviewImageSurfaceStore } from "~/previewImageSurfaceStore";
 import { useThreadPreviewState } from "~/previewStateStore";
 import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 
 import { previewBridge } from "./previewBridge";
-import { PreviewMiniPlayerImageSurface } from "./PreviewMiniPlayerImageSurface";
+import { PreviewImageSurface } from "./PreviewImageSurface";
 import {
   clampPreviewMiniPlayerPosition,
   clampPreviewMiniPlayerSize,
@@ -114,17 +115,24 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
   const snapshot = previewState.sessions[tabId] ?? null;
   const runtimeTabId = previewRuntimeTabId(threadRef, previewState.serverEpoch, tabId);
   const desktopOverlay = previewState.desktopByTabId[tabId] ?? null;
+  const registeredImageSource = usePreviewImageSurfaceStore((state) =>
+    selectPreviewImageSource(state.byThreadKey, threadRef, tabId),
+  );
   const position = miniPlayer?.tabId === tabId ? miniPlayer.position : null;
   const size =
     miniPlayer?.tabId === tabId && miniPlayer.size
       ? miniPlayer.size
       : PREVIEW_MINI_PLAYER_DEFAULT_SIZE;
-  const imageSource = miniPlayer?.tabId === tabId ? miniPlayer.imageSource : null;
+  const imageSource =
+    miniPlayer?.tabId === tabId ? (miniPlayer.imageSource ?? registeredImageSource) : null;
   const close = () => {
     usePreviewMiniPlayerStore.getState().close(threadRef);
   };
 
   const openInPanel = () => {
+    if (imageSource) {
+      usePreviewImageSurfaceStore.getState().register(threadRef, tabId, imageSource);
+    }
     usePreviewMiniPlayerStore.getState().close(threadRef);
     useRightPanelStore.getState().openBrowser(threadRef, tabId);
   };
@@ -159,6 +167,11 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!imageSource || !desktopOverlay?.pictureInPicture || !previewBridge) return;
+    void previewBridge.pictureInPicture.close(runtimeTabId).catch(() => undefined);
+  }, [desktopOverlay?.pictureInPicture, imageSource, runtimeTabId]);
 
   const flushDragPosition = () => {
     if (dragFrameRef.current !== null) {
@@ -378,25 +391,27 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
           >
             <PanelRightIcon />
           </Button>
-          <Button
-            variant={desktopOverlay?.pictureInPicture ? "secondary" : "ghost"}
-            size="icon-xs"
-            aria-label={
-              desktopOverlay?.pictureInPicture
-                ? "Close popped-out preview"
-                : "Pop preview into separate window"
-            }
-            title={
-              desktopOverlay?.pictureInPicture
-                ? "Close separate window"
-                : "Pop into separate window"
-            }
-            disabled={!desktopOverlay?.hasWebContents}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={toggleNativePictureInPicture}
-          >
-            <PictureInPicture2 />
-          </Button>
+          {!imageSource ? (
+            <Button
+              variant={desktopOverlay?.pictureInPicture ? "secondary" : "ghost"}
+              size="icon-xs"
+              aria-label={
+                desktopOverlay?.pictureInPicture
+                  ? "Close popped-out preview"
+                  : "Pop preview into separate window"
+              }
+              title={
+                desktopOverlay?.pictureInPicture
+                  ? "Close separate window"
+                  : "Pop into separate window"
+              }
+              disabled={!desktopOverlay?.hasWebContents}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={toggleNativePictureInPicture}
+            >
+              <PictureInPicture2 />
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             size="icon-xs"
@@ -422,7 +437,10 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
       <div className="relative h-full min-h-0">
         <div className="absolute inset-0 z-[29] rounded-xl bg-muted shadow-2xl/35" />
         {imageSource ? (
-          <PreviewMiniPlayerImageSurface source={imageSource} />
+          <PreviewImageSurface
+            source={imageSource}
+            className="absolute inset-x-2 bottom-3 top-7 z-[30]"
+          />
         ) : (
           <BrowserSurfaceSlot
             tabId={runtimeTabId}

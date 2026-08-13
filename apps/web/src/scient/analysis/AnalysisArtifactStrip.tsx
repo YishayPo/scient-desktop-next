@@ -29,6 +29,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { resolveAssetUrl, useAssetUrls } from "~/assets/assetUrls";
+import { usePreviewImageSurfaceStore } from "~/previewImageSurfaceStore";
 import {
   applyPreviewServerSnapshot,
   isPreviewSupportedInRuntime,
@@ -52,6 +53,7 @@ import {
   canFollowArtifactInTab,
   floatingArtifactPositionForDrop,
   interactiveArtifactRepresentation,
+  isImageArtifactRepresentation,
   nativeArtifactRepresentation,
   preferredArtifactPreview,
   preferredArtifactThumbnail,
@@ -220,6 +222,14 @@ export function AnalysisArtifactStrip(props: {
         }
         applyPreviewServerSnapshot(props.threadRef, navigation.value);
         rememberPreviewUrl(props.threadRef, url);
+        if (isImageArtifactRepresentation(representation)) {
+          usePreviewImageSurfaceStore.getState().register(props.threadRef, tabId, {
+            url,
+            alt: artifact.label,
+          });
+        } else {
+          usePreviewImageSurfaceStore.getState().remove(props.threadRef, tabId);
+        }
         const miniPlayer = selectThreadPreviewMiniPlayer(
           usePreviewMiniPlayerStore.getState().byThreadKey,
           props.threadRef,
@@ -300,6 +310,16 @@ export function AnalysisArtifactStrip(props: {
       }
       applyPreviewServerSnapshot(props.threadRef, result.value);
       rememberPreviewUrl(props.threadRef, url);
+      const imageSource = isImageArtifactRepresentation(representation)
+        ? { url, alt: artifact.label }
+        : null;
+      if (imageSource) {
+        usePreviewImageSurfaceStore
+          .getState()
+          .register(props.threadRef, result.value.tabId, imageSource);
+      } else {
+        usePreviewImageSurfaceStore.getState().remove(props.threadRef, result.value.tabId);
+      }
       followedTabsRef.current.set(result.value.tabId, {
         artifactId: artifact.artifactId,
         representationId: representation.representationId,
@@ -308,10 +328,7 @@ export function AnalysisArtifactStrip(props: {
       if (mode === "pin") {
         usePreviewMiniPlayerStore
           .getState()
-          .open(props.threadRef, result.value.tabId, initialPosition, {
-            url,
-            alt: artifact.label,
-          });
+          .open(props.threadRef, result.value.tabId, initialPosition, imageSource ?? undefined);
       } else {
         useRightPanelStore.getState().openBrowser(props.threadRef, result.value.tabId);
       }

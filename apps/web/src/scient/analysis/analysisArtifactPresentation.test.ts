@@ -19,6 +19,7 @@ import {
   canFollowArtifactInTab,
   floatingArtifactPositionForDrop,
   interactiveArtifactRepresentation,
+  isImageArtifactRepresentation,
   nativeArtifactRepresentation,
   preferredArtifactPreview,
   preferredArtifactThumbnail,
@@ -120,6 +121,9 @@ describe("analysis artifact presentation", () => {
     expect(preferredArtifactThumbnail(artifact)?.representationId).toBe("static-svg");
     expect(interactiveArtifactRepresentation(artifact)?.representationId).toBe("interactive-html");
     expect(nativeArtifactRepresentation(artifact)?.representationId).toBe("matlab-figure");
+    expect(isImageArtifactRepresentation(artifact.representations[0]!)).toBe(true);
+    expect(isImageArtifactRepresentation(artifact.representations[1]!)).toBe(true);
+    expect(isImageArtifactRepresentation(artifact.representations[2]!)).toBe(false);
   });
 
   it("creates a stable producer-owned asset reference", () => {

@@ -51,6 +51,12 @@ export function nativeArtifactRepresentation(
   return artifact.representations.find((candidate) => candidate.presentation === "native") ?? null;
 }
 
+export function isImageArtifactRepresentation(
+  representation: AnalysisArtifactRepresentation,
+): boolean {
+  return representation.mediaType === "image/png" || representation.mediaType === "image/svg+xml";
+}
+
 export function analysisArtifactResource(
   run: AnalysisRun,
   artifact: AnalysisArtifact,

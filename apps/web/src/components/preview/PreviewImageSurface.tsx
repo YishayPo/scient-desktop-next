@@ -2,9 +2,10 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { PreviewMiniPlayerImageSource } from "~/previewMiniPlayerStore";
+import { cn } from "~/lib/utils";
+import type { PreviewImageSource } from "~/previewImageSurfaceStore";
 
-import { nextPreviewMiniPlayerImageZoom } from "./previewMiniPlayerLayout";
+import { nextPreviewImageZoom } from "./previewImageZoom";
 
 interface ImageZoomAnchor {
   readonly contentX: number;
@@ -13,23 +14,40 @@ interface ImageZoomAnchor {
   readonly localY: number;
 }
 
-export function PreviewMiniPlayerImageSurface({
+const ZOOM_HINT_DURATION_MS = 1_800;
+
+/** Shared static-image viewer used by both the right panel and floating preview. */
+export function PreviewImageSurface({
   source,
+  className,
 }: {
-  readonly source: PreviewMiniPlayerImageSource;
+  readonly source: PreviewImageSource;
+  readonly className?: string;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const zoomFrameRef = useRef<number | null>(null);
+  const zoomHintTimerRef = useRef<number | null>(null);
+  const zoomHintShownRef = useRef(false);
   const pendingZoomDeltaRef = useRef(0);
   const pendingZoomPointRef = useRef<{ readonly x: number; readonly y: number } | null>(null);
   const pendingZoomAnchorRef = useRef<ImageZoomAnchor | null>(null);
   const zoomRef = useRef(1);
   const [zoom, setZoom] = useState(1);
+  const [showZoomHint, setShowZoomHint] = useState(false);
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "failed">("loading");
+
+  const dismissZoomHint = () => {
+    if (zoomHintTimerRef.current !== null) {
+      window.clearTimeout(zoomHintTimerRef.current);
+      zoomHintTimerRef.current = null;
+    }
+    setShowZoomHint(false);
+  };
 
   useEffect(
     () => () => {
       if (zoomFrameRef.current !== null) window.cancelAnimationFrame(zoomFrameRef.current);
+      if (zoomHintTimerRef.current !== null) window.clearTimeout(zoomHintTimerRef.current);
     },
     [],
   );
@@ -55,6 +73,7 @@ export function PreviewMiniPlayerImageSurface({
       if (!event.ctrlKey) return;
       event.preventDefault();
       event.stopPropagation();
+      dismissZoomHint();
       const rect = viewport.getBoundingClientRect();
       pendingZoomDeltaRef.current += event.deltaY;
       pendingZoomPointRef.current = {
@@ -70,7 +89,7 @@ export function PreviewMiniPlayerImageSurface({
         pendingZoomDeltaRef.current = 0;
         if (!point) return;
         const current = zoomRef.current;
-        const next = nextPreviewMiniPlayerImageZoom(current, delta);
+        const next = nextPreviewImageZoom(current, delta);
         if (Math.abs(next - current) < 0.001) return;
         pendingZoomAnchorRef.current = {
           contentX: (viewport.scrollLeft + point.x) / current,
@@ -84,7 +103,7 @@ export function PreviewMiniPlayerImageSurface({
     };
     viewport.addEventListener("wheel", handleWheel, { passive: false });
     return () => viewport.removeEventListener("wheel", handleWheel);
-  }, [source.url]);
+  }, []);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -95,11 +114,25 @@ export function PreviewMiniPlayerImageSurface({
     viewport.scrollTop = anchor.contentY * zoom - anchor.localY;
   }, [zoom]);
 
+  const handleLoad = () => {
+    setLoadState("loaded");
+    if (zoomHintShownRef.current) return;
+    zoomHintShownRef.current = true;
+    setShowZoomHint(true);
+    zoomHintTimerRef.current = window.setTimeout(() => {
+      zoomHintTimerRef.current = null;
+      setShowZoomHint(false);
+    }, ZOOM_HINT_DURATION_MS);
+  };
+
   return (
     <div
       ref={viewportRef}
-      className="pointer-events-auto absolute inset-x-2 bottom-3 top-7 z-[30] overflow-auto overscroll-contain bg-background"
-      title="Pinch with two fingers to zoom"
+      className={cn(
+        "pointer-events-auto relative overflow-auto overscroll-contain bg-background",
+        className,
+      )}
+      data-preview-image-surface
     >
       <div
         className="relative shrink-0 bg-background"
@@ -111,8 +144,11 @@ export function PreviewMiniPlayerImageSurface({
           alt={source.alt}
           draggable={false}
           className={`absolute inset-0 size-full select-none object-contain transition-opacity duration-100 ${loadState === "loaded" ? "opacity-100" : "opacity-0"}`}
-          onLoad={() => setLoadState("loaded")}
-          onError={() => setLoadState("failed")}
+          onLoad={handleLoad}
+          onError={() => {
+            dismissZoomHint();
+            setLoadState("failed");
+          }}
         />
       </div>
       {loadState !== "loaded" ? (
@@ -120,6 +156,15 @@ export function PreviewMiniPlayerImageSurface({
           {loadState === "failed" ? "Unable to load figure" : "Loading figure…"}
         </div>
       ) : null}
+      <div
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-border/70 bg-popover/95 px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm transition-opacity duration-200",
+          showZoomHint ? "opacity-100" : "opacity-0",
+        )}
+      >
+        Pinch with two fingers to zoom
+      </div>
     </div>
   );
 }

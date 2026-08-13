@@ -21,6 +21,7 @@ import {
 import { type ComposerImageAttachment, useComposerDraftStore } from "~/composerDraftStore";
 import { previewAnnotationScreenshotFile } from "~/lib/previewAnnotation";
 import { ensureLocalApi } from "~/localApi";
+import { selectPreviewImageSource, usePreviewImageSurfaceStore } from "~/previewImageSurfaceStore";
 import {
   rememberPreviewUrl,
   updatePreviewServerSnapshot,
@@ -37,6 +38,7 @@ import { previewBridge } from "./previewBridge";
 import { subscribePreviewAction } from "./previewActionBus";
 import { openPreviewSession } from "./openPreviewSession";
 import { PreviewChromeRow } from "./PreviewChromeRow";
+import { PreviewImageSurface } from "./PreviewImageSurface";
 import { PreviewEmptyState } from "./PreviewEmptyState";
 import { PreviewMoreMenu } from "./PreviewMoreMenu";
 import {
@@ -87,6 +89,7 @@ export function PreviewView({
   onSendAnnotation,
 }: Props) {
   const [focusUrlNonce, setFocusUrlNonce] = useState<number | undefined>(undefined);
+  const [imageReloadNonce, setImageReloadNonce] = useState(0);
   const [pickActive, setPickActive] = useState(false);
   const activeRecordingTabIds = useActiveBrowserRecordingTabIds();
   const pickActiveRef = useRef(false);
@@ -122,6 +125,9 @@ export function PreviewView({
   }, []);
 
   const tabId = requestedTabId ?? previewState.activeTabId;
+  const registeredImageSource = usePreviewImageSurfaceStore((state) =>
+    selectPreviewImageSource(state.byThreadKey, threadRef, tabId),
+  );
   const runtimeTabId = tabId
     ? previewRuntimeTabId(threadRef, previewState.serverEpoch, tabId)
     : null;
@@ -135,6 +141,7 @@ export function PreviewView({
   const desktopOverlay = tabId ? (previewState.desktopByTabId[tabId] ?? null) : null;
   const navStatus = snapshot?.navStatus ?? { _tag: "Idle" as const };
   const url = navStatus._tag === "Idle" ? "" : navStatus.url;
+  const imageSource = registeredImageSource?.url === url ? registeredImageSource : null;
   const loading = desktopOverlay?.loading ?? navStatus._tag === "Loading";
   const canGoBack = desktopOverlay?.canGoBack ?? snapshot?.canGoBack ?? false;
   const canGoForward = desktopOverlay?.canGoForward ?? snapshot?.canGoForward ?? false;
@@ -202,8 +209,12 @@ export function PreviewView({
   );
 
   const handleRefresh = useCallback(() => {
+    if (imageSource) {
+      setImageReloadNonce((value) => value + 1);
+      return;
+    }
     if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
-  }, [runtimeTabId]);
+  }, [imageSource, runtimeTabId]);
 
   const handleZoomIn = useCallback(() => {
     if (previewBridge && runtimeTabId) void previewBridge.zoomIn(runtimeTabId);
@@ -281,12 +292,16 @@ export function PreviewView({
       usePreviewMiniPlayerStore.getState().close(threadRef);
       return;
     }
-    usePreviewMiniPlayerStore.getState().open(threadRef, tabId);
+    if (imageSource) {
+      usePreviewMiniPlayerStore.getState().open(threadRef, tabId, undefined, imageSource);
+    } else {
+      usePreviewMiniPlayerStore.getState().open(threadRef, tabId);
+    }
     useRightPanelStore.getState().close(threadRef);
-  }, [miniPlayer?.tabId, tabId, threadRef]);
+  }, [imageSource, miniPlayer?.tabId, tabId, threadRef]);
 
   const handleNativePictureInPicture = useCallback(() => {
-    if (!previewBridge || !runtimeTabId) return;
+    if (!previewBridge || !runtimeTabId || imageSource) return;
     const operation = desktopOverlay?.pictureInPicture
       ? previewBridge.pictureInPicture.close
       : previewBridge.pictureInPicture.open;
@@ -297,7 +312,13 @@ export function PreviewView({
         description: error instanceof Error ? error.message : "An error occurred.",
       });
     });
-  }, [desktopOverlay?.pictureInPicture, runtimeTabId]);
+  }, [desktopOverlay?.pictureInPicture, imageSource, runtimeTabId]);
+
+  useEffect(() => {
+    if (!imageSource || !desktopOverlay?.pictureInPicture || !previewBridge || !runtimeTabId)
+      return;
+    void previewBridge.pictureInPicture.close(runtimeTabId).catch(() => undefined);
+  }, [desktopOverlay?.pictureInPicture, imageSource, runtimeTabId]);
 
   const handleCapture = useCallback(
     (record: boolean) => {
@@ -668,13 +689,17 @@ export function PreviewView({
         onRefresh={handleRefresh}
         onSubmit={(next) => void handleSubmitUrl(next)}
         onOpenInBrowser={tabId ? handleOpenInBrowser : undefined}
-        onCapture={previewBridge && tabId ? handleCapture : undefined}
+        onCapture={previewBridge && tabId && !imageSource ? handleCapture : undefined}
         captureDisabled={!desktopOverlay || isUnreachable}
         recording={recordingRuntimeTabId !== null}
-        onPictureInPicture={previewBridge && tabId ? handlePictureInPicture : undefined}
+        onPictureInPicture={
+          tabId && (previewBridge || imageSource) ? handlePictureInPicture : undefined
+        }
         pictureInPicture={miniPlayer?.tabId === tabId}
-        pictureInPictureDisabled={!desktopOverlay?.hasWebContents || isUnreachable}
-        onPickElement={previewBridge && tabId ? handlePickElement : undefined}
+        pictureInPictureDisabled={
+          imageSource ? false : !desktopOverlay?.hasWebContents || isUnreachable
+        }
+        onPickElement={previewBridge && tabId && !imageSource ? handlePickElement : undefined}
         pickActive={pickActive}
         // Disable when there's no tab (nothing to pick on) OR the page
         // failed to load (a React overlay covers the webview, so the
@@ -684,7 +709,7 @@ export function PreviewView({
           isUnreachable ? "Page didn't load — pick unavailable until the page renders" : undefined
         }
         trailingActions={
-          previewBridge ? (
+          previewBridge && !imageSource ? (
             <PreviewMoreMenu
               tabId={runtimeTabId}
               hasWebContents={desktopOverlay?.hasWebContents ?? false}
@@ -700,12 +725,19 @@ export function PreviewView({
       />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {runtimeTabId && snapshot && !showEmptyState ? (
+        {runtimeTabId && snapshot && !showEmptyState && !imageSource ? (
           <BrowserSurfaceSlot
             key={runtimeTabId}
             tabId={runtimeTabId}
             visible={visible && !isUnreachable}
             className="absolute inset-0 h-full w-full"
+          />
+        ) : null}
+        {runtimeTabId && snapshot && !showEmptyState && imageSource ? (
+          <PreviewImageSurface
+            key={`image:${runtimeTabId}:${imageReloadNonce}`}
+            source={imageSource}
+            className="absolute inset-0"
           />
         ) : null}
         {showEmptyState ? (
@@ -718,22 +750,22 @@ export function PreviewView({
             onOpenUrl={(next) => void handleOpenServerUrl(next)}
           />
         ) : null}
-        {snapshot && desktopOverlay ? (
+        {snapshot && desktopOverlay && !imageSource ? (
           <ZoomIndicator zoomFactor={desktopOverlay.zoomFactor} />
         ) : null}
-        {runtimeTabId && desktopOverlay && !showEmptyState && !isUnreachable ? (
+        {runtimeTabId && desktopOverlay && !showEmptyState && !isUnreachable && !imageSource ? (
           <AgentBrowserCursor
             tabId={runtimeTabId}
             zoomFactor={desktopOverlay.zoomFactor}
             controller={controller}
           />
         ) : null}
-        {controller !== "none" ? (
+        {controller !== "none" && !imageSource ? (
           <div className="pointer-events-none absolute left-3 top-3 z-40 rounded-full border border-border/70 bg-background/90 px-2.5 py-1 text-[11px] font-medium shadow-sm backdrop-blur">
             {controller === "agent" ? "Agent controlling browser" : "Human control"}
           </div>
         ) : null}
-        {navStatus._tag === "LoadFailed" ? (
+        {navStatus._tag === "LoadFailed" && !imageSource ? (
           <div className="absolute inset-0 z-10 bg-background">
             <PreviewUnreachable
               url={navStatus.url}

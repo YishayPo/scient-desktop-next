@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   clampPreviewMiniPlayerPosition,
   clampPreviewMiniPlayerSize,
-  nextPreviewMiniPlayerImageZoom,
   PREVIEW_MINI_PLAYER_DEFAULT_SIZE,
   PREVIEW_MINI_PLAYER_DEFAULT_TOP,
   PREVIEW_MINI_PLAYER_EDGE_GAP,
@@ -23,13 +22,6 @@ describe("clampPreviewMiniPlayerPosition", () => {
         PREVIEW_MINI_PLAYER_DEFAULT_SIZE,
       ),
     ).toEqual({ x: 400, y: PREVIEW_MINI_PLAYER_DEFAULT_TOP });
-  });
-
-  it("maps smooth trackpad deltas into bounded image zoom", () => {
-    expect(nextPreviewMiniPlayerImageZoom(1, -20)).toBeGreaterThan(1);
-    expect(nextPreviewMiniPlayerImageZoom(1, 20)).toBe(1);
-    expect(nextPreviewMiniPlayerImageZoom(4.9, -1_000)).toBe(5);
-    expect(nextPreviewMiniPlayerImageZoom(Number.NaN, 0)).toBe(1);
   });
 
   it("keeps a dragged player within the app viewport", () => {

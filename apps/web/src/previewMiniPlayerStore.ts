@@ -2,6 +2,8 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";
 
+import type { PreviewImageSource } from "./previewImageSurfaceStore";
+
 export interface PreviewMiniPlayerPosition {
   readonly x: number;
   readonly y: number;
@@ -17,10 +19,7 @@ export interface PreviewMiniPlayerRect {
   readonly size: PreviewMiniPlayerSize;
 }
 
-export interface PreviewMiniPlayerImageSource {
-  readonly url: string;
-  readonly alt: string;
-}
+export type PreviewMiniPlayerImageSource = PreviewImageSource;
 
 export interface PreviewMiniPlayerState {
   readonly tabId: string;

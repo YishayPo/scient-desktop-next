@@ -4,22 +4,12 @@ export const PREVIEW_MINI_PLAYER_EDGE_GAP = 12;
 export const PREVIEW_MINI_PLAYER_DEFAULT_SIZE = { width: 400, height: 260 } as const;
 export const PREVIEW_MINI_PLAYER_MIN_SIZE = { width: 240, height: 150 } as const;
 export const PREVIEW_MINI_PLAYER_DEFAULT_TOP = 72;
-export const PREVIEW_MINI_PLAYER_IMAGE_MIN_ZOOM = 1;
-export const PREVIEW_MINI_PLAYER_IMAGE_MAX_ZOOM = 5;
 
 export type PreviewMiniPlayerResizeDirection = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
 
 export interface PreviewMiniPlayerRect {
   readonly position: PreviewMiniPlayerPosition;
   readonly size: PreviewMiniPlayerSize;
-}
-
-export function nextPreviewMiniPlayerImageZoom(current: number, wheelDeltaY: number): number {
-  const normalizedCurrent = Number.isFinite(current) ? current : PREVIEW_MINI_PLAYER_IMAGE_MIN_ZOOM;
-  return Math.min(
-    PREVIEW_MINI_PLAYER_IMAGE_MAX_ZOOM,
-    Math.max(PREVIEW_MINI_PLAYER_IMAGE_MIN_ZOOM, normalizedCurrent * Math.exp(-wheelDeltaY * 0.01)),
-  );
 }
 
 export function clampPreviewMiniPlayerSize(
