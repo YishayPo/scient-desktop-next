@@ -206,6 +206,27 @@ export const ProjectReadFileResult = Schema.Struct({
 });
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 
+/** Subscribe to authoritative changes for one file that is currently open. */
+export const ProjectSubscribeFileChangesInput = ProjectReadFileInput;
+export type ProjectSubscribeFileChangesInput = typeof ProjectSubscribeFileChangesInput.Type;
+
+/**
+ * A hint that the file may need an authoritative reread. Clients reread on
+ * readiness to close the query-to-watcher race, and again on change instead of
+ * treating either event as file contents. The only portable distinction is
+ * watcher readiness versus "something changed"; create/update/remove and the
+ * authoritative revision come from the subsequent read.
+ */
+export const ProjectFileWatchEvent = Schema.Union([
+  Schema.TaggedStruct("watch-ready", {
+    relativePath: TrimmedNonEmptyString,
+  }),
+  Schema.TaggedStruct("file-changed", {
+    relativePath: TrimmedNonEmptyString,
+  }),
+]);
+export type ProjectFileWatchEvent = typeof ProjectFileWatchEvent.Type;
+
 export const ProjectFileFailure = Schema.Literals([
   "workspace_path_outside_root",
   "resolved_path_outside_root",
@@ -219,6 +240,7 @@ export type ProjectFileFailure = typeof ProjectFileFailure.Type;
 export const ProjectFileOperation = Schema.Literals([
   "realpath-workspace-root",
   "realpath-target",
+  "realpath-watch-directory",
   "open",
   "stat",
   "read",
@@ -226,6 +248,7 @@ export const ProjectFileOperation = Schema.Literals([
   "make-directory",
   "write-file",
   "atomic-write-file",
+  "watch",
 ]);
 export type ProjectFileOperation = typeof ProjectFileOperation.Type;
 

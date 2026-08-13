@@ -96,7 +96,7 @@ describe("DesktopEnvironment", () => {
   it.effect("stores production state under userdata in an explicit home", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(
-        {},
+        { isPackaged: true },
         {
           SCIENT_NEXT_HOME: "/tmp/scient-next",
         },
@@ -110,13 +110,26 @@ describe("DesktopEnvironment", () => {
     }),
   );
 
+  it.effect("never opens production state from an unpackaged direct launch", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment(
+        { isPackaged: false },
+        { SCIENT_NEXT_HOME: "/tmp/scient-next" },
+      );
+
+      assert.equal(environment.isDevelopment, true);
+      assert.equal(environment.stateDir, "/tmp/scient-next/scient-next-dev");
+      assert.equal(environment.userDataDirName, "scient-next-dev");
+    }),
+  );
+
   it.effect("keeps implicit development state separate from production state", () =>
     Effect.gen(function* () {
       const development = yield* makeEnvironment(
         {},
         { VITE_DEV_SERVER_URL: "http://localhost:5173" },
       );
-      const production = yield* makeEnvironment();
+      const production = yield* makeEnvironment({ isPackaged: true });
 
       assert.equal(development.stateDir, "/Users/alice/.scient-next/scient-next-dev");
       assert.equal(production.stateDir, "/Users/alice/.scient-next/userdata");

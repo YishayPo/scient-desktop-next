@@ -3,8 +3,10 @@ import {
   ArtifactId,
   ArtifactRevisionId,
 } from "@scientfactory/document-artifacts";
+import { AnalysisArtifactResourceRef } from "@scientfactory/analysis";
 import type { AssetResource } from "@t3tools/contracts";
 import {
+  AssetAnalysisArtifactNotFoundError,
   AssetAttachmentNotFoundError,
   AssetGeneratedDocumentAuthorityMismatchError,
   AssetGeneratedDocumentNotFoundError,
@@ -49,6 +51,7 @@ import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import type { ResolvedGeneratedDocumentRevision } from "../scient/documentArtifacts/GeneratedDocumentStore.ts";
+import type { ResolvedAnalysisArtifactRepresentation } from "../scient/analysis/LocalAnalysisStore.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
 export const ASSET_ROUTE_PREFIX = "/api/assets";
@@ -105,6 +108,16 @@ const AssetClaimsSchema = Schema.Union([
     authority: ArtifactAuthority,
     artifactId: ArtifactId,
     revisionId: ArtifactRevisionId,
+    path: Schema.String,
+    fileName: Schema.String,
+    expiresAt: Schema.Number,
+    revisionSize: Schema.Number,
+    revisionMtimeMs: Schema.NullOr(Schema.Number),
+  }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("analysis-artifact"),
+    ...AnalysisArtifactResourceRef.fields,
     path: Schema.String,
     fileName: Schema.String,
     expiresAt: Schema.Number,
@@ -198,6 +211,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   readonly workspaceRoot?: string;
   readonly projectFaviconPath?: string;
   readonly generatedDocument?: ResolvedGeneratedDocumentRevision;
+  readonly analysisArtifact?: ResolvedAnalysisArtifactRepresentation;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -464,6 +478,46 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       fileName = input.generatedDocument.fileName;
       break;
     }
+    case "analysis-artifact": {
+      const resolved = input.analysisArtifact;
+      if (
+        !resolved ||
+        resolved.artifact.artifactId !== input.resource.artifactId ||
+        resolved.representation.representationId !== input.resource.representationId
+      ) {
+        return yield* new AssetAnalysisArtifactNotFoundError({ resource: input.resource });
+      }
+      const config = yield* ServerConfig.ServerConfig;
+      const [canonicalAnalysisRoot, canonicalArtifactPath] = yield* Effect.all([
+        fileSystem.realPath(config.analysisDir),
+        fileSystem.realPath(resolved.path),
+      ]).pipe(
+        Effect.mapError(() => new AssetAnalysisArtifactNotFoundError({ resource: input.resource })),
+      );
+      const analysisRelativePath = path.relative(canonicalAnalysisRoot, canonicalArtifactPath);
+      if (
+        analysisRelativePath === "" ||
+        analysisRelativePath.startsWith("..") ||
+        path.isAbsolute(analysisRelativePath)
+      ) {
+        return yield* new AssetAnalysisArtifactNotFoundError({ resource: input.resource });
+      }
+      claims = {
+        version: 1,
+        kind: "analysis-artifact",
+        projectId: input.resource.projectId,
+        runId: input.resource.runId,
+        artifactId: input.resource.artifactId,
+        representationId: input.resource.representationId,
+        path: canonicalArtifactPath,
+        fileName: resolved.representation.fileName,
+        expiresAt,
+        revisionSize: resolved.revision.size,
+        revisionMtimeMs: resolved.revision.mtimeMs,
+      };
+      fileName = resolved.representation.fileName;
+      break;
+    }
   }
 
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
@@ -543,6 +597,19 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
   }
 
   if (claims.kind === "generated-document") {
+    const decodedPath = decodeRelativePath(relativePath);
+    if (decodedPath === null || decodedPath !== claims.fileName) return null;
+    return {
+      kind: "file",
+      path: claims.path,
+      revision: {
+        size: claims.revisionSize,
+        mtimeMs: claims.revisionMtimeMs,
+      },
+    } satisfies ResolvedAsset;
+  }
+
+  if (claims.kind === "analysis-artifact") {
     const decodedPath = decodeRelativePath(relativePath);
     if (decodedPath === null || decodedPath !== claims.fileName) return null;
     return {

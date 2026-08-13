@@ -4,7 +4,9 @@ import { it, describe, expect } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -209,6 +211,176 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
         });
         expect(error.cause).toBeInstanceOf(Error);
         expect((error.cause as NodeJS.ErrnoException).code).toBe("ENOENT");
+      }),
+    );
+  });
+
+  describe("watchFile", () => {
+    it.effect("emits a coalesced hint only when the selected file changes", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "analysis.m", "answer = 1;\n");
+        yield* writeTextFile(cwd, "notes.txt", "unchanged\n");
+        const opened = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "analysis.m",
+        });
+
+        const event = yield* workspaceFileSystem
+          .watchFile({ cwd, relativePath: "analysis.m" })
+          .pipe(
+            Stream.tap((event) =>
+              event._tag === "watch-ready"
+                ? Effect.gen(function* () {
+                    yield* writeTextFile(cwd, "notes.txt", "unrelated\n");
+                    yield* workspaceFileSystem.writeFile({
+                      cwd,
+                      relativePath: "analysis.m",
+                      contents: "answer = 2;\n",
+                      expectedRevision: opened.revision,
+                    });
+                  })
+                : Effect.void,
+            ),
+            Stream.filter((event) => event._tag === "file-changed"),
+            Stream.runHead,
+          );
+
+        expect(event).toEqual(Option.some({ _tag: "file-changed", relativePath: "analysis.m" }));
+      }),
+    );
+
+    it.effect("emits a hint when the selected file is removed", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "analysis.m", "answer = 1;\n");
+
+        const event = yield* workspaceFileSystem
+          .watchFile({ cwd, relativePath: "analysis.m" })
+          .pipe(
+            Stream.tap((event) =>
+              event._tag === "watch-ready"
+                ? fileSystem.remove(path.join(cwd, "analysis.m"))
+                : Effect.void,
+            ),
+            Stream.filter((event) => event._tag === "file-changed"),
+            Stream.runHead,
+          );
+
+        expect(event).toEqual(Option.some({ _tag: "file-changed", relativePath: "analysis.m" }));
+      }),
+    );
+
+    it.effect("keeps watching a missing file so recreation can recover the viewer", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+
+        const event = yield* workspaceFileSystem
+          .watchFile({ cwd, relativePath: "analysis.m" })
+          .pipe(
+            Stream.tap((event) =>
+              event._tag === "watch-ready"
+                ? writeTextFile(cwd, "analysis.m", "answer = 2;\n")
+                : Effect.void,
+            ),
+            Stream.filter((event) => event._tag === "file-changed"),
+            Stream.runHead,
+          );
+
+        expect(event).toEqual(Option.some({ _tag: "file-changed", relativePath: "analysis.m" }));
+      }),
+    );
+
+    it.effect("continues watching across deletion and recreation", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const absolutePath = path.join(cwd, "analysis.m");
+        yield* writeTextFile(cwd, "analysis.m", "answer = 1;\n");
+        let observedChanges = 0;
+
+        const events = yield* workspaceFileSystem
+          .watchFile({ cwd, relativePath: "analysis.m" })
+          .pipe(
+            Stream.tap((event) => {
+              if (event._tag === "watch-ready") return fileSystem.remove(absolutePath);
+              observedChanges += 1;
+              return observedChanges === 1
+                ? writeTextFile(cwd, "analysis.m", "answer = 2;\n")
+                : Effect.void;
+            }),
+            Stream.filter((event) => event._tag === "file-changed"),
+            Stream.take(2),
+            Stream.runCollect,
+          );
+
+        expect([...events]).toEqual([
+          { _tag: "file-changed", relativePath: "analysis.m" },
+          { _tag: "file-changed", relativePath: "analysis.m" },
+        ]);
+        expect(yield* fileSystem.readFileString(absolutePath)).toBe("answer = 2;\n");
+      }),
+    );
+
+    it.effect("follows in-workspace file symlinks to their real target", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "sources/analysis.m", "answer = 1;\n");
+        yield* fileSystem.symlink(
+          path.join(cwd, "sources/analysis.m"),
+          path.join(cwd, "analysis.m"),
+        );
+
+        const event = yield* workspaceFileSystem
+          .watchFile({ cwd, relativePath: "analysis.m" })
+          .pipe(
+            Stream.tap((event) =>
+              event._tag === "watch-ready"
+                ? writeTextFile(cwd, "sources/analysis.m", "answer = 2;\n")
+                : Effect.void,
+            ),
+            Stream.filter((event) => event._tag === "file-changed"),
+            Stream.runHead,
+          );
+
+        expect(event).toEqual(Option.some({ _tag: "file-changed", relativePath: "analysis.m" }));
+      }),
+    );
+
+    it.effect("rejects watch paths and symlink targets outside the workspace", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const outsideDir = yield* makeTempDir;
+        yield* writeTextFile(outsideDir, "analysis.m", "answer = 1;\n");
+        yield* fileSystem.symlink(
+          path.join(outsideDir, "analysis.m"),
+          path.join(cwd, "analysis.m"),
+        );
+
+        const lexicalEscape = yield* workspaceFileSystem
+          .watchFile({ cwd, relativePath: "../analysis.m" })
+          .pipe(Stream.runHead, Effect.flip);
+        const symlinkEscape = yield* workspaceFileSystem
+          .watchFile({ cwd, relativePath: "analysis.m" })
+          .pipe(Stream.runHead, Effect.flip);
+
+        expect(lexicalEscape.message).toContain(
+          "Workspace file path must be relative to the project root: ../analysis.m",
+        );
+        expect(symlinkEscape).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFilePathEscapeError);
       }),
     );
   });

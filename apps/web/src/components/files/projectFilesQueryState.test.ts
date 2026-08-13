@@ -68,4 +68,31 @@ describe("project files queries", () => {
       ),
     ).toBe(true);
   });
+
+  it("reveals authoritative contents after a local draft is discarded", () => {
+    const authoritative = {
+      relativePath: "convex.json",
+      contents: '{"nodeVersion":"22"}',
+      byteLength: 20,
+      truncated: false,
+      revision: "revision-agent",
+    } satisfies ProjectReadFileResult;
+    setProjectFileQueryData(
+      environmentId,
+      "/repo",
+      "convex.json",
+      '{"nodeVersion":"local"}',
+      "revision-before",
+    );
+
+    expect(
+      resolveProjectFileQueryData(environmentId, "/repo", "convex.json", authoritative),
+    ).not.toEqual(authoritative);
+
+    clearProjectFileQueryData(environmentId, "/repo", "convex.json");
+
+    expect(
+      resolveProjectFileQueryData(environmentId, "/repo", "convex.json", authoritative),
+    ).toEqual(authoritative);
+  });
 });

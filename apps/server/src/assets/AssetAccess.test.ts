@@ -1,5 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  AnalysisArtifactContentHash,
+  AnalysisArtifactFileName,
+  AnalysisArtifactId,
+  AnalysisArtifactRepresentationId,
+} from "@scientfactory/analysis";
+import {
   ArtifactAuthority,
   ArtifactId,
   ArtifactProducerId,
@@ -9,6 +15,7 @@ import {
   ProducingOperationId,
 } from "@scientfactory/document-artifacts";
 import { AssetPreviewTypeValidationError, ThreadId } from "@t3tools/contracts";
+import { ExecutionRunId } from "@scientfactory/execution";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
@@ -41,6 +48,67 @@ const testLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 describe("AssetAccess", () => {
+  it.effect("issues exact immutable URLs for published analysis artifacts", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const artifactPath = path.join(
+        config.analysisDir,
+        "runs",
+        "project-1",
+        "run-1",
+        "artifacts",
+        "figure-001.svg",
+      );
+      yield* fileSystem.makeDirectory(path.dirname(artifactPath), { recursive: true });
+      yield* fileSystem.writeFileString(artifactPath, "<svg/>");
+      const artifactId = AnalysisArtifactId.make("figure-001");
+      const representationId = AnalysisArtifactRepresentationId.make("static-svg");
+      const resource = {
+        _tag: "analysis-artifact" as const,
+        projectId: "project-1",
+        runId: ExecutionRunId.make("run-1"),
+        artifactId,
+        representationId,
+      };
+      const result = yield* issueAssetUrl({
+        resource,
+        analysisArtifact: {
+          artifact: {
+            artifactId,
+            kind: "figure",
+            label: "Figure 1",
+            createdAt: "2026-08-12T00:00:00.000Z",
+            representations: [],
+          },
+          representation: {
+            representationId,
+            fileName: AnalysisArtifactFileName.make("figure-001.svg"),
+            mediaType: "image/svg+xml",
+            presentation: "static",
+            requiresNetworkForFullExperience: false,
+            contentHash: AnalysisArtifactContentHash.make(`sha256:${"0".repeat(64)}`),
+            byteLength: 6,
+          },
+          path: artifactPath,
+          revision: { size: 6, mtimeMs: null },
+        },
+      });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separatorIndex = suffix.indexOf("/");
+      const token = suffix.slice(0, separatorIndex);
+
+      expect(yield* resolveAsset(token, "figure-001.svg")).toEqual({
+        kind: "file",
+        path: yield* fileSystem.realPath(artifactPath),
+        revision: { size: 6, mtimeMs: null },
+      });
+      expect(yield* resolveAsset(token, "figure-002.svg")).toBeNull();
+      expect(yield* resolveAsset(token, "../figure-001.svg")).toBeNull();
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("issues workspace URLs that resolve the entry file and sibling assets", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

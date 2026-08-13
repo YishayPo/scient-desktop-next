@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "owner": "ScientFactory",
+  "ownedRoots": [
+    "apps/server/src/scient/analysis",
+    "apps/server/src/scient/execution",
+    "apps/web/src/scient/analysis",
+    "apps/web/src/scient/fileSurfaces",
+    "packages/scient-analysis",
+    "packages/scient-execution"
+  ],
+  "ownedFiles": [
+    "apps/server/src/orchestration/scient-fork/migrations/005_AnalysisRunIndex.ts",
+    "apps/server/src/orchestration/scient-fork/migrations/006_AnalysisRunProjectionState.ts",
+    "apps/server/src/orchestration/scient-fork/migrations/007_AnalysisRunStorageStatus.ts",
+    "apps/web/src/state/analysis.ts",
+    "packages/contracts/src/scientAnalysis.ts"
+  ],
+  "upstreamMounts": [
+    {
+      "path": "apps/desktop/src/app/DesktopEnvironment.ts",
+      "anchor": "developmentUserDataDirName",
+      "purpose": "Keep development state isolated from the installed Scient application."
+    },
+    {
+      "path": "apps/desktop/src/backend/DesktopBackendConfiguration.ts",
+      "anchor": "SCIENT_NEXT_HOME",
+      "purpose": "Pass the isolated development state root to the local backend."
+    },
+    {
+      "path": "apps/server/src/atomicWrite.ts",
+      "anchor": "writeFileStringAtomically",
+      "purpose": "Provide the generic atomic-write primitive used by conditional file saves."
+    },
+    {
+      "path": "apps/server/src/assets/AssetAccess.ts",
+      "anchor": "analysis-artifact",
+      "purpose": "Resolve typed analysis artifacts through the shared asset service."
+    },
+    {
+      "path": "apps/server/src/auth/RpcAuthorization.ts",
+      "anchor": "analysisStartRun",
+      "purpose": "Authorize analysis read and operate RPC methods."
+    },
+    {
+      "path": "apps/server/src/cli/config.ts",
+      "anchor": "SCIENT_NEXT_DEVELOPMENT_STATE",
+      "purpose": "Accept the desktop-provided isolated state root."
+    },
+    {
+      "path": "apps/server/src/config.ts",
+      "anchor": "analysisDir",
+      "purpose": "Derive server-owned analysis storage from the configured state root."
+    },
+    {
+      "path": "apps/server/src/orchestration/scient-fork/scientMigrator.ts",
+      "anchor": "AnalysisRunIndex",
+      "purpose": "Register Scient-owned analysis projection migrations."
+    },
+    {
+      "path": "apps/server/src/server.ts",
+      "anchor": "AnalysisService",
+      "purpose": "Provide analysis and execution services to the shared server layer."
+    },
+    {
+      "path": "apps/server/src/workspace/WorkspaceFileSystem.ts",
+      "anchor": "watchFile",
+      "purpose": "Expose generic revision-aware reads, conditional writes, and exact-file watching."
+    },
+    {
+      "path": "apps/server/src/ws.ts",
+      "anchor": "analysisStartRun",
+      "purpose": "Mount authenticated analysis and exact-file-watch RPC handlers."
+    },
+    {
+      "path": "apps/web/src/components/files/FilePreviewPanel.tsx",
+      "anchor": "ScientFileAuxiliarySurface",
+      "purpose": "Mount the additive analysis surface and generic freshness controls in the file viewer."
+    },
+    {
+      "path": "apps/web/src/components/files/fileSaveCoordinator.ts",
+      "anchor": "confirmedFileRevision",
+      "purpose": "Preserve dirty buffers across conditional-write conflicts."
+    },
+    {
+      "path": "apps/web/src/components/files/projectFilesQueryState.ts",
+      "anchor": "revision",
+      "purpose": "Carry authoritative file revisions through the shared file-query projection."
+    },
+    {
+      "path": "apps/web/src/components/preview/ThreadPreviewMiniPlayer.tsx",
+      "anchor": "resizePreviewMiniPlayerRect",
+      "purpose": "Reuse the generic browser mini-player for draggable and resizable artifact cards."
+    },
+    {
+      "path": "apps/web/src/components/preview/previewMiniPlayerLayout.ts",
+      "anchor": "resizePreviewMiniPlayerRect",
+      "purpose": "Keep generic card geometry pure and independently testable."
+    },
+    {
+      "path": "apps/web/src/previewMiniPlayerStore.ts",
+      "anchor": "setRect",
+      "purpose": "Persist generic mini-player position and size atomically."
+    },
+    {
+      "path": "apps/web/src/scient/pdf/ScientPdfReader.tsx",
+      "anchor": "refreshKey",
+      "purpose": "Refresh an already-open PDF after an exact-file change."
+    },
+    {
+      "path": "packages/client-runtime/src/rpc/client.ts",
+      "anchor": "subscribeAnalysisRuns",
+      "purpose": "Register the typed analysis subscription with the shared RPC client."
+    },
+    {
+      "path": "packages/client-runtime/src/state/analysis.ts",
+      "anchor": "applyAnalysisRunStreamEvent",
+      "purpose": "Project bounded analysis history and live output into client state."
+    },
+    {
+      "path": "packages/client-runtime/src/state/projectCommands.ts",
+      "anchor": "projectsWriteFile",
+      "purpose": "Send conditional-write revisions through the existing file command."
+    },
+    {
+      "path": "packages/contracts/src/assets.ts",
+      "anchor": "analysis-artifact",
+      "purpose": "Add a producer-neutral analysis artifact resource kind."
+    },
+    {
+      "path": "packages/contracts/src/project.ts",
+      "anchor": "ProjectFileWatchEvent",
+      "purpose": "Define generic file revision, conditional-write, and watch contracts."
+    },
+    {
+      "path": "packages/contracts/src/rpc.ts",
+      "anchor": "analysisStartRun",
+      "purpose": "Register analysis methods in the shared typed RPC surface."
+    }
+  ]
+}

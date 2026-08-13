@@ -12,6 +12,11 @@ export interface PreviewMiniPlayerSize {
   readonly height: number;
 }
 
+export interface PreviewMiniPlayerRect {
+  readonly position: PreviewMiniPlayerPosition;
+  readonly size: PreviewMiniPlayerSize;
+}
+
 export interface PreviewMiniPlayerState {
   readonly tabId: string;
   readonly position: PreviewMiniPlayerPosition | null;
@@ -20,26 +25,37 @@ export interface PreviewMiniPlayerState {
 
 interface PreviewMiniPlayerStoreState {
   readonly byThreadKey: Record<string, PreviewMiniPlayerState>;
-  readonly open: (ref: ScopedThreadRef, tabId: string) => void;
+  readonly open: (
+    ref: ScopedThreadRef,
+    tabId: string,
+    position?: PreviewMiniPlayerPosition,
+  ) => void;
   readonly close: (ref: ScopedThreadRef) => void;
   readonly move: (ref: ScopedThreadRef, tabId: string, position: PreviewMiniPlayerPosition) => void;
   readonly resize: (ref: ScopedThreadRef, tabId: string, size: PreviewMiniPlayerSize) => void;
+  readonly setRect: (ref: ScopedThreadRef, tabId: string, rect: PreviewMiniPlayerRect) => void;
   readonly removeThread: (ref: ScopedThreadRef) => void;
 }
 
 export const usePreviewMiniPlayerStore = create<PreviewMiniPlayerStoreState>()((set) => ({
   byThreadKey: {},
-  open: (ref, tabId) =>
+  open: (ref, tabId, position) =>
     set((state) => {
       const threadKey = scopedThreadKey(ref);
       const current = state.byThreadKey[threadKey];
-      if (current?.tabId === tabId) return state;
+      if (
+        current?.tabId === tabId &&
+        (position === undefined ||
+          (current.position?.x === position.x && current.position.y === position.y))
+      ) {
+        return state;
+      }
       return {
         byThreadKey: {
           ...state.byThreadKey,
           [threadKey]: {
             tabId,
-            position: current?.position ?? null,
+            position: position ?? current?.position ?? null,
             size: current?.size ?? null,
           },
         },
@@ -75,6 +91,26 @@ export const usePreviewMiniPlayerStore = create<PreviewMiniPlayerStoreState>()((
         byThreadKey: {
           ...state.byThreadKey,
           [threadKey]: { ...current, size },
+        },
+      };
+    }),
+  setRect: (ref, tabId, rect) =>
+    set((state) => {
+      const threadKey = scopedThreadKey(ref);
+      const current = state.byThreadKey[threadKey];
+      if (!current || current.tabId !== tabId) return state;
+      if (
+        current.position?.x === rect.position.x &&
+        current.position.y === rect.position.y &&
+        current.size?.width === rect.size.width &&
+        current.size.height === rect.size.height
+      ) {
+        return state;
+      }
+      return {
+        byThreadKey: {
+          ...state.byThreadKey,
+          [threadKey]: { ...current, position: rect.position, size: rect.size },
         },
       };
     }),

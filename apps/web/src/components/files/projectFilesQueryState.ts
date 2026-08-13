@@ -22,11 +22,15 @@ function optimisticFileAtom(environmentId: EnvironmentId, cwd: string, relativeP
   return projectEnvironment.optimisticFile({ environmentId, cwd, relativePath });
 }
 
-interface ProjectQueryState<A> {
+export interface ProjectQueryState<A> {
   readonly data: A | null;
   readonly error: string | null;
   readonly isPending: boolean;
   readonly refresh: () => void;
+}
+
+export interface ProjectFileQueryState extends ProjectQueryState<ProjectReadFileResult> {
+  readonly authoritativeData: ProjectReadFileResult | null;
 }
 
 export function getProjectEntriesQueryAtom(environmentId: EnvironmentId, cwd: string) {
@@ -191,7 +195,7 @@ export function useProjectFileQuery(
   cwd: string,
   relativePath: string | null,
   enabled = true,
-): ProjectQueryState<ProjectReadFileResult> {
+): ProjectFileQueryState {
   const atom = enabled
     ? getProjectFileQueryAtom(environmentId, cwd, relativePath)
     : EMPTY_PROJECT_FILE_QUERY_ATOM;
@@ -206,6 +210,7 @@ export function useProjectFileQuery(
 
   return {
     data: optimisticFile?.data ?? data,
+    authoritativeData: data,
     error: errorMessage(result),
     isPending: result.waiting,
     refresh,

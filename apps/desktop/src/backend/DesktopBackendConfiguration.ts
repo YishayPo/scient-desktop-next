@@ -87,6 +87,7 @@ const DESKTOP_BACKEND_ENV_NAMES = [
   "T3CODE_DESKTOP_HTTPS_ENDPOINTS",
   "T3CODE_TAILSCALE_SERVE",
   "T3CODE_TAILSCALE_SERVE_PORT",
+  "SCIENT_NEXT_DEVELOPMENT_STATE",
 ] as const;
 
 // Sensitive env vars that the WSL backend needs but Windows process.env won't
@@ -97,6 +98,7 @@ const WSL_FORWARDED_ENV_NAMES = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"] as const
 const WSL_CANDIDATE_ENV_NAMES = [
   "T3CODE_HOME",
   "SCIENT_NEXT_HOME",
+  "SCIENT_NEXT_DEVELOPMENT_STATE",
   "SCIENT_NEXT_SAFETY_ENVELOPE",
 ] as const;
 
@@ -412,7 +414,15 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
 
     return {
       executablePath: process.execPath,
-      args: [environment.backendEntryPath, "--bootstrap-fd", "3"],
+      args: [
+        environment.backendEntryPath,
+        "--bootstrap-fd",
+        "3",
+        ...Option.match(environment.devServerUrl, {
+          onNone: () => [] as ReadonlyArray<string>,
+          onSome: (url) => ["--dev-url", url.href],
+        }),
+      ],
       entryPath: environment.backendEntryPath,
       cwd: environment.backendCwd,
       env: {
@@ -424,6 +434,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
         // candidate-owned alias explicitly.
         T3CODE_HOME: environment.baseDir,
         SCIENT_NEXT_HOME: environment.baseDir,
+        SCIENT_NEXT_DEVELOPMENT_STATE: environment.isDevelopment ? "true" : undefined,
         SCIENT_NEXT_SAFETY_ENVELOPE: SCIENT_NEXT_IDENTITY.safetyEnvelopeMarker,
       },
       // Primary wants process.env (PATH, dev-runner's T3CODE_HOME, etc.).
@@ -569,6 +580,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
       // home. The server expands this POSIX path against the distro HOME.
       T3CODE_HOME: "~/.scient-next",
       SCIENT_NEXT_HOME: "~/.scient-next",
+      SCIENT_NEXT_DEVELOPMENT_STATE: environment.isDevelopment ? "true" : undefined,
       SCIENT_NEXT_SAFETY_ENVELOPE: SCIENT_NEXT_IDENTITY.safetyEnvelopeMarker,
       ...(wslEnv !== undefined ? { WSLENV: wslEnv } : {}),
     },

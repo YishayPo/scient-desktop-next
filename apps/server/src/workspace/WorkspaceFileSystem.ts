@@ -8,22 +8,27 @@
  * @module WorkspaceFileSystem
  */
 import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 
 import type {
+  ProjectFileWatchEvent,
   ProjectReadFileInput,
   ProjectReadFileResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SynchronizedRef from "effect/SynchronizedRef";
+import * as Stream from "effect/Stream";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
@@ -45,6 +50,7 @@ export class WorkspaceFileSystemOperationError extends Schema.TaggedErrorClass<W
     operation: Schema.Literals([
       "realpath-workspace-root",
       "realpath-target",
+      "realpath-watch-directory",
       "open",
       "stat",
       "read",
@@ -52,6 +58,7 @@ export class WorkspaceFileSystemOperationError extends Schema.TaggedErrorClass<W
       "make-directory",
       "write-file",
       "atomic-write-file",
+      "watch",
     ]),
     cause: Schema.Defect(),
   },
@@ -147,6 +154,13 @@ export class WorkspaceFileSystem extends Context.Service<
       ProjectWriteFileResult,
       WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
     >;
+    /** Observe native filesystem hints for one currently open file. */
+    readonly watchFile: (
+      input: ProjectReadFileInput,
+    ) => Stream.Stream<
+      ProjectFileWatchEvent,
+      WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
+    >;
   }
 >()("t3/workspace/WorkspaceFileSystem") {}
 
@@ -176,14 +190,13 @@ export const make = Effect.gen(function* () {
   const revisionForContents = (contents: string): string =>
     revisionForBytes(new TextEncoder().encode(contents));
 
-  const readFile: WorkspaceFileSystem["Service"]["readFile"] = Effect.fn(
-    "WorkspaceFileSystem.readFile",
-  )(function* (input) {
+  const resolveRealFileTarget = Effect.fn("WorkspaceFileSystem.resolveRealFileTarget")(function* (
+    input: ProjectReadFileInput,
+  ) {
     const target = yield* workspacePaths.resolveRelativePathWithinRoot({
       workspaceRoot: input.cwd,
       relativePath: input.relativePath,
     });
-
     const realWorkspaceRoot = yield* Effect.tryPromise({
       try: () => NodeFSP.realpath(input.cwd),
       catch: (cause) =>
@@ -221,6 +234,13 @@ export const make = Effect.gen(function* () {
         resolvedPath: realTargetPath,
       });
     }
+    return { target, realWorkspaceRoot, realTargetPath };
+  });
+
+  const readFile: WorkspaceFileSystem["Service"]["readFile"] = Effect.fn(
+    "WorkspaceFileSystem.readFile",
+  )(function* (input) {
+    const { target, realTargetPath } = yield* resolveRealFileTarget(input);
 
     return yield* Effect.acquireUseRelease(
       Effect.tryPromise({
@@ -303,6 +323,91 @@ export const make = Effect.gen(function* () {
         }),
     );
   });
+
+  const resolveRealFileWatchTarget = Effect.fn("WorkspaceFileSystem.resolveRealFileWatchTarget")(
+    function* (input: ProjectReadFileInput) {
+      const target = yield* workspacePaths.resolveRelativePathWithinRoot({
+        workspaceRoot: input.cwd,
+        relativePath: input.relativePath,
+      });
+      const realWorkspaceRoot = yield* Effect.tryPromise({
+        try: () => NodeFSP.realpath(input.cwd),
+        catch: (cause) =>
+          new WorkspaceFileSystemOperationError({
+            workspaceRoot: input.cwd,
+            relativePath: input.relativePath,
+            resolvedPath: target.absolutePath,
+            operationPath: input.cwd,
+            operation: "realpath-workspace-root",
+            cause,
+          }),
+      });
+      const resolvedParentDirectory = yield* Effect.tryPromise({
+        try: () => NodeFSP.realpath(path.dirname(target.absolutePath)),
+        catch: (cause) =>
+          new WorkspaceFileSystemOperationError({
+            workspaceRoot: input.cwd,
+            relativePath: input.relativePath,
+            resolvedPath: target.absolutePath,
+            operationPath: path.dirname(target.absolutePath),
+            operation: "realpath-watch-directory",
+            cause,
+          }),
+      });
+      const relativeWatchDirectory = path.relative(realWorkspaceRoot, resolvedParentDirectory);
+      if (
+        relativeWatchDirectory.startsWith(`..${path.sep}`) ||
+        relativeWatchDirectory === ".." ||
+        path.isAbsolute(relativeWatchDirectory)
+      ) {
+        return yield* new WorkspaceFilePathEscapeError({
+          workspaceRoot: input.cwd,
+          relativePath: input.relativePath,
+          resolvedWorkspaceRoot: realWorkspaceRoot,
+          resolvedPath: resolvedParentDirectory,
+        });
+      }
+      const realTargetPath = yield* Effect.tryPromise({
+        try: async () => {
+          try {
+            return await NodeFSP.realpath(target.absolutePath);
+          } catch (error) {
+            if (isNodeError(error, "ENOENT")) {
+              return path.join(resolvedParentDirectory, path.basename(target.absolutePath));
+            }
+            throw error;
+          }
+        },
+        catch: (cause) =>
+          new WorkspaceFileSystemOperationError({
+            workspaceRoot: input.cwd,
+            relativePath: input.relativePath,
+            resolvedPath: target.absolutePath,
+            operationPath: target.absolutePath,
+            operation: "realpath-target",
+            cause,
+          }),
+      });
+      const relativeRealPath = path.relative(realWorkspaceRoot, realTargetPath);
+      if (
+        relativeRealPath.startsWith(`..${path.sep}`) ||
+        relativeRealPath === ".." ||
+        path.isAbsolute(relativeRealPath)
+      ) {
+        return yield* new WorkspaceFilePathEscapeError({
+          workspaceRoot: input.cwd,
+          relativePath: input.relativePath,
+          resolvedWorkspaceRoot: realWorkspaceRoot,
+          resolvedPath: realTargetPath,
+        });
+      }
+      // Existing file symlinks need to watch the resolved target's directory,
+      // not merely the directory containing the link. Missing files already
+      // resolve through their canonical parent above.
+      const watchDirectory = path.dirname(realTargetPath);
+      return { realTargetPath, target, watchDirectory };
+    },
+  );
 
   const writeFile: WorkspaceFileSystem["Service"]["writeFile"] = Effect.fn(
     "WorkspaceFileSystem.writeFile",
@@ -427,7 +532,85 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  return WorkspaceFileSystem.of({ readFile, writeFile });
+  const watchFile: WorkspaceFileSystem["Service"]["watchFile"] = (input) =>
+    Stream.unwrap(
+      resolveRealFileWatchTarget(input).pipe(
+        Effect.map(({ realTargetPath, target, watchDirectory }) => {
+          return Stream.callback<ProjectFileWatchEvent, WorkspaceFileSystemOperationError>(
+            (queue) =>
+              Effect.acquireRelease(
+                Effect.try({
+                  try: () => {
+                    const watcher = NodeFS.watch(watchDirectory, (_event, reportedPath) => {
+                      // Node documents that filename may be absent on some
+                      // platforms. Since this watcher is scoped to one parent,
+                      // a conservative reread is cheaper than missing a save.
+                      if (reportedPath !== null) {
+                        const absoluteReportedPath = path.isAbsolute(reportedPath)
+                          ? path.resolve(reportedPath)
+                          : path.resolve(watchDirectory, reportedPath);
+                        if (absoluteReportedPath !== realTargetPath) return;
+                      }
+                      Queue.offerUnsafe(queue, {
+                        _tag: "file-changed",
+                        relativePath: target.relativePath,
+                      });
+                    });
+                    watcher.on("error", (cause) => {
+                      Queue.failCauseUnsafe(
+                        queue,
+                        Cause.fail(
+                          new WorkspaceFileSystemOperationError({
+                            workspaceRoot: input.cwd,
+                            relativePath: input.relativePath,
+                            resolvedPath: realTargetPath,
+                            operationPath: watchDirectory,
+                            operation: "watch",
+                            cause,
+                          }),
+                        ),
+                      );
+                    });
+                    watcher.on("close", () => Queue.endUnsafe(queue));
+                    Queue.offerUnsafe(queue, {
+                      _tag: "watch-ready",
+                      relativePath: target.relativePath,
+                    });
+                    return watcher;
+                  },
+                  catch: (cause) =>
+                    new WorkspaceFileSystemOperationError({
+                      workspaceRoot: input.cwd,
+                      relativePath: input.relativePath,
+                      resolvedPath: realTargetPath,
+                      operationPath: watchDirectory,
+                      operation: "watch",
+                      cause,
+                    }),
+                }),
+                (watcher) => Effect.sync(() => watcher.close()),
+              ),
+          ).pipe(
+            // Editors and atomic writers commonly produce several events for
+            // one save. Batch them after the write settles, but preserve the
+            // explicit readiness signal used by clients and deterministic tests.
+            Stream.groupedWithin(256, "100 millis"),
+            Stream.flatMap((events) => {
+              const coalesced: ProjectFileWatchEvent[] = [];
+              if (events.some((event) => event._tag === "watch-ready")) {
+                coalesced.push({ _tag: "watch-ready", relativePath: target.relativePath });
+              }
+              if (events.some((event) => event._tag === "file-changed")) {
+                coalesced.push({ _tag: "file-changed", relativePath: target.relativePath });
+              }
+              return Stream.fromIterable(coalesced);
+            }),
+          );
+        }),
+      ),
+    );
+
+  return WorkspaceFileSystem.of({ readFile, watchFile, writeFile });
 });
 
 export const layer = Layer.effect(WorkspaceFileSystem, make);

@@ -3,6 +3,7 @@ import {
   ArtifactId,
   ArtifactRevisionId,
 } from "@scientfactory/document-artifacts";
+import { AnalysisArtifactResourceRef } from "@scientfactory/analysis";
 import * as Schema from "effect/Schema";
 
 import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
@@ -28,6 +29,9 @@ export const AssetResource = Schema.Union([
     authority: ArtifactAuthority,
     artifactId: ArtifactId,
     revisionId: ArtifactRevisionId,
+  }),
+  Schema.TaggedStruct("analysis-artifact", {
+    ...AnalysisArtifactResourceRef.fields,
   }),
 ]);
 export type AssetResource = typeof AssetResource.Type;
@@ -219,6 +223,29 @@ export class AssetGeneratedDocumentResolutionError extends Schema.TaggedErrorCla
   }
 }
 
+export class AssetAnalysisArtifactNotFoundError extends Schema.TaggedErrorClass<AssetAnalysisArtifactNotFoundError>()(
+  "AssetAnalysisArtifactNotFoundError",
+  {
+    resource: AssetResource,
+  },
+) {
+  override get message(): string {
+    return "Analysis artifact was not found.";
+  }
+}
+
+export class AssetAnalysisArtifactResolutionError extends Schema.TaggedErrorClass<AssetAnalysisArtifactResolutionError>()(
+  "AssetAnalysisArtifactResolutionError",
+  {
+    resource: AssetResource,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "Failed to resolve analysis artifact.";
+  }
+}
+
 export class AssetSigningKeyLoadError extends Schema.TaggedErrorClass<AssetSigningKeyLoadError>()(
   "AssetSigningKeyLoadError",
   {
@@ -247,6 +274,8 @@ export const AssetAccessError = Schema.Union([
   AssetGeneratedDocumentNotFoundError,
   AssetGeneratedDocumentAuthorityMismatchError,
   AssetGeneratedDocumentResolutionError,
+  AssetAnalysisArtifactNotFoundError,
+  AssetAnalysisArtifactResolutionError,
   AssetSigningKeyLoadError,
 ]);
 export type AssetAccessError = typeof AssetAccessError.Type;

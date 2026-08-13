@@ -103,11 +103,18 @@ function PdfPasswordPrompt(props: {
 
 export function ScientPdfReader(props: {
   readonly actions?: PdfSourceActions;
+  readonly refreshKey?: number;
   readonly resolver?: PdfSourceResolver;
   readonly source: PdfSourceDescriptor;
 }) {
   const resolver = props.resolver ?? webPdfSourceResolver;
   const asset = resolver.useResolve(props.source);
+  const previousRefreshKey = useRef(props.refreshKey);
+  useEffect(() => {
+    if (previousRefreshKey.current === props.refreshKey) return;
+    previousRefreshKey.current = props.refreshKey;
+    asset.refresh();
+  }, [asset.refresh, props.refreshKey]);
   if (asset._tag === "Failure") {
     return (
       <div className="scient-pdf-reader">

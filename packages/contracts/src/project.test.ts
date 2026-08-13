@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  ProjectFileWatchEvent,
   ProjectReadFileError,
   ProjectSearchContentsError,
   ProjectSearchContentsInput,
@@ -12,6 +13,27 @@ import {
 
 const decodeSearchEntriesInput = Schema.decodeUnknownSync(ProjectSearchEntriesInput);
 const decodeSearchContentsInput = Schema.decodeUnknownSync(ProjectSearchContentsInput);
+const decodeFileWatchEvent = Schema.decodeUnknownSync(ProjectFileWatchEvent);
+
+describe("project file watch events", () => {
+  it("carries only a readiness or change hint and never file contents", () => {
+    expect(decodeFileWatchEvent({ _tag: "watch-ready", relativePath: "analysis.m" })).toEqual({
+      _tag: "watch-ready",
+      relativePath: "analysis.m",
+    });
+    expect(decodeFileWatchEvent({ _tag: "file-changed", relativePath: "analysis.m" })).toEqual({
+      _tag: "file-changed",
+      relativePath: "analysis.m",
+    });
+    expect(
+      decodeFileWatchEvent({
+        _tag: "file-changed",
+        relativePath: "analysis.m",
+        contents: "must not cross the watcher stream",
+      }),
+    ).toEqual({ _tag: "file-changed", relativePath: "analysis.m" });
+  });
+});
 
 describe("project search inputs", () => {
   it("allows an empty entries query for bounded frecency browsing", () => {

@@ -4,6 +4,7 @@ import {
   clampPreviewMiniPlayerPosition,
   clampPreviewMiniPlayerSize,
   PREVIEW_MINI_PLAYER_EDGE_GAP,
+  resizePreviewMiniPlayerRect,
 } from "./previewMiniPlayerLayout";
 
 describe("clampPreviewMiniPlayerPosition", () => {
@@ -69,5 +70,68 @@ describe("clampPreviewMiniPlayerSize", () => {
     expect(
       clampPreviewMiniPlayerSize({ width: 360, height: 239 }, { width: 250, height: 180 }, 20),
     ).toEqual({ width: 226, height: 136 });
+  });
+});
+
+describe("resizePreviewMiniPlayerRect", () => {
+  const rect = { position: { x: 200, y: 160 }, size: { width: 320, height: 200 } };
+  const container = { width: 1_000, height: 700 };
+
+  it("anchors the opposite corner when resizing from the top left", () => {
+    expect(
+      resizePreviewMiniPlayerRect({
+        rect,
+        direction: "nw",
+        delta: { x: -80, y: -40 },
+        container,
+      }),
+    ).toEqual({ position: { x: 120, y: 120 }, size: { width: 400, height: 240 } });
+  });
+
+  it("resizes from individual edges without moving unrelated edges", () => {
+    expect(
+      resizePreviewMiniPlayerRect({
+        rect,
+        direction: "w",
+        delta: { x: 40, y: 90 },
+        container,
+      }),
+    ).toEqual({ position: { x: 240, y: 160 }, size: { width: 280, height: 200 } });
+    expect(
+      resizePreviewMiniPlayerRect({
+        rect,
+        direction: "s",
+        delta: { x: 90, y: 60 },
+        container,
+      }),
+    ).toEqual({ position: { x: 200, y: 160 }, size: { width: 320, height: 260 } });
+  });
+
+  it("honors viewport, composer, and minimum-size bounds from every direction", () => {
+    expect(
+      resizePreviewMiniPlayerRect({
+        rect,
+        direction: "nw",
+        delta: { x: -1_000, y: -1_000 },
+        container,
+      }),
+    ).toEqual({ position: { x: 12, y: 12 }, size: { width: 508, height: 348 } });
+    expect(
+      resizePreviewMiniPlayerRect({
+        rect,
+        direction: "se",
+        delta: { x: 1_000, y: 1_000 },
+        container,
+        bottomInset: 120,
+      }),
+    ).toEqual({ position: { x: 200, y: 160 }, size: { width: 788, height: 408 } });
+    expect(
+      resizePreviewMiniPlayerRect({
+        rect,
+        direction: "nw",
+        delta: { x: 1_000, y: 1_000 },
+        container,
+      }),
+    ).toEqual({ position: { x: 280, y: 210 }, size: { width: 240, height: 150 } });
   });
 });

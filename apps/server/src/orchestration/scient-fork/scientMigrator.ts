@@ -40,6 +40,9 @@ import Migration001 from "./migrations/001_DurableThreadForks.ts";
 import Migration002 from "./migrations/002_DurableProviderBootstrap.ts";
 import Migration003 from "./migrations/003_NormalizeActiveLineage.ts";
 import Migration004 from "./migrations/004_QuarantineInvalidLineage.ts";
+import Migration005 from "./migrations/005_AnalysisRunIndex.ts";
+import Migration006 from "./migrations/006_AnalysisRunProjectionState.ts";
+import Migration007 from "./migrations/007_AnalysisRunStorageStatus.ts";
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -83,6 +86,9 @@ export const SCIENT_MIGRATIONS: ReadonlyArray<ScientMigration> = [
   { id: 2, name: "durable-provider-bootstrap", effect: Migration002 },
   { id: 3, name: "normalize-active-lineage", effect: Migration003 },
   { id: 4, name: "quarantine-invalid-lineage", effect: Migration004 },
+  { id: 5, name: "analysis-run-index", effect: Migration005 },
+  { id: 6, name: "analysis-run-projection-state", effect: Migration006 },
+  { id: 7, name: "analysis-run-storage-status", effect: Migration007 },
 ] as const;
 
 const loader = Migrator.fromRecord(

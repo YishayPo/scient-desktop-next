@@ -84,6 +84,9 @@ const EnvServerConfig = Config.all({
   scientNextSafetyEnvelope: Config.boolean("SCIENT_NEXT_SAFETY_ENVELOPE").pipe(
     Config.withDefault(false),
   ),
+  scientNextDevelopmentState: Config.boolean("SCIENT_NEXT_DEVELOPMENT_STATE").pipe(
+    Config.withDefault(false),
+  ),
   logLevel: Config.logLevel("T3CODE_LOG_LEVEL").pipe(Config.withDefault("Info")),
   traceMinLevel: Config.logLevel("T3CODE_TRACE_MIN_LEVEL").pipe(Config.withDefault("Info")),
   traceTimingEnabled: Config.boolean("T3CODE_TRACE_TIMING_ENABLED").pipe(Config.withDefault(true)),
@@ -316,6 +319,7 @@ export const resolveServerConfig = (
       // present. Keep it under the candidate development directory rather
       // than production userdata.
       developmentStateDirName: SCIENT_NEXT_IDENTITY.developmentUserDataDirName,
+      forceDevelopmentState: env.scientNextDevelopmentState,
       baseDirIsExplicit:
         Option.isSome(cliBaseDir) ||
         (Option.isSome(explicitBaseDir) &&

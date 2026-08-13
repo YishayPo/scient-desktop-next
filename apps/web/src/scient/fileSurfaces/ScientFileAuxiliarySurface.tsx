@@ -1,9 +1,10 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 
 import { AnalysisRunFilePanel } from "~/scient/analysis/AnalysisRunFilePanel";
 
 interface ScientFileAuxiliarySurfaceProps {
   readonly environmentId: EnvironmentId;
+  readonly threadRef: ScopedThreadRef;
   readonly cwd: string;
   readonly relativePath: string | null;
   readonly sourceRevision: string | null;
@@ -29,6 +30,7 @@ export function ScientFileAuxiliarySurface(props: ScientFileAuxiliarySurfaceProp
     <AnalysisRunFilePanel
       key={`${props.environmentId}:${props.cwd}:${props.relativePath}`}
       environmentId={props.environmentId}
+      threadRef={props.threadRef}
       cwd={props.cwd}
       relativePath={props.relativePath}
       sourceRevision={props.sourceRevision}

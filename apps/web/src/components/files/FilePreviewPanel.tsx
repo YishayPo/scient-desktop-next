@@ -1,9 +1,8 @@
-import type {
-  EditorId,
-  EnvironmentId,
-  ProjectWriteFileResult,
-  ResolvedKeybindingsConfig,
-  ScopedThreadRef,
+import {
+  type EditorId,
+  type EnvironmentId,
+  type ResolvedKeybindingsConfig,
+  type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { VirtualizedFile, type SelectedLineRange } from "@pierre/diffs";
 import { Editor } from "@pierre/diffs/editor";
@@ -46,6 +45,14 @@ import {
 import { scientificSourceLanguageOverride } from "~/scient/analysis/sourceLanguage";
 import { ScientFileAuxiliarySurface } from "~/scient/fileSurfaces/ScientFileAuxiliarySurface";
 import { workspacePdfSourceForPreview } from "~/scient/pdf/pdfSource";
+import {
+  ScientFileFreshnessNotices,
+  ScientFileReloadButton,
+} from "~/scient/fileSurfaces/ScientFileFreshnessControls";
+import {
+  type FileSaveResolution,
+  useWorkspaceFileRefresh,
+} from "~/scient/fileSurfaces/useWorkspaceFileRefresh";
 
 import FileBrowserPanel from "./FileBrowserPanel";
 import {
@@ -73,7 +80,6 @@ import {
   confirmProjectFileQueryData,
   getOptimisticProjectFileQueryData,
   setProjectFileQueryData,
-  useProjectFileQuery,
 } from "./projectFilesQueryState";
 
 interface FilePreviewPanelProps {
@@ -150,6 +156,7 @@ function WorkspaceImagePreview(props: {
   readonly threadRef: ScopedThreadRef;
   readonly absolutePath: string;
   readonly alt: string;
+  readonly refreshKey: number;
 }) {
   const assetUrl = useAssetUrlState(props.environmentId, {
     _tag: "workspace-file",
@@ -157,6 +164,14 @@ function WorkspaceImagePreview(props: {
     path: props.absolutePath,
   });
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const previousRefreshKey = useRef(props.refreshKey);
+
+  useEffect(() => {
+    if (previousRefreshKey.current === props.refreshKey) return;
+    previousRefreshKey.current = props.refreshKey;
+    setFailedUrl(null);
+    assetUrl.refresh();
+  }, [assetUrl.refresh, props.refreshKey]);
 
   if (assetUrl._tag === "Failure" || (assetUrl._tag === "Success" && failedUrl === assetUrl.url)) {
     return (
@@ -411,6 +426,10 @@ interface EditableFileSurfaceProps {
   wordWrap: boolean;
   onPostRender: FilePostRender;
   onPendingChange: (relativePath: string, pending: boolean) => void;
+  onSaveFailure: (relativePath: string, error: unknown) => void;
+  onSaveConfirmed: (relativePath: string, contents: string, revision: string) => void;
+  onSaveResolutionApplied: () => void;
+  saveResolution: FileSaveResolution | null;
 }
 
 interface FileSelectionOverride {
@@ -424,10 +443,22 @@ function useFileSaveCoordinator({
   relativePath,
   revision,
   onPendingChange,
+  onSaveFailure,
+  onSaveConfirmed,
+  onSaveResolutionApplied,
+  saveResolution,
 }: Pick<
   EditableFileSurfaceProps,
-  "environmentId" | "cwd" | "relativePath" | "revision" | "onPendingChange"
->): FileSaveCoordinator<ProjectWriteFileResult, unknown> {
+  | "environmentId"
+  | "cwd"
+  | "relativePath"
+  | "revision"
+  | "onPendingChange"
+  | "onSaveFailure"
+  | "onSaveConfirmed"
+  | "onSaveResolutionApplied"
+  | "saveResolution"
+>) {
   const writeFile = useAtomCommand(projectEnvironment.writeFile);
   const coordinator = useMemo(
     () =>
@@ -449,12 +480,33 @@ function useFileSaveCoordinator({
             confirmedContents,
             result.revision,
           );
+          onSaveConfirmed(relativePath, confirmedContents, result.revision);
         },
+        onFailure: (_contents, result) =>
+          onSaveFailure(relativePath, squashAtomCommandFailure(result)),
+        onResolutionApplied: onSaveResolutionApplied,
       }),
-    [cwd, environmentId, onPendingChange, relativePath, writeFile],
+    [
+      cwd,
+      environmentId,
+      onPendingChange,
+      onSaveConfirmed,
+      onSaveFailure,
+      onSaveResolutionApplied,
+      relativePath,
+      writeFile,
+    ],
   );
 
   useEffect(() => coordinator.syncConfirmedFileRevision(revision), [coordinator, revision]);
+  useEffect(() => {
+    if (saveResolution?.relativePath !== relativePath) return;
+    if (saveResolution.action === "discard") {
+      coordinator.discardPending(saveResolution.revision);
+    } else {
+      coordinator.retryPending(saveResolution.revision);
+    }
+  }, [coordinator, relativePath, saveResolution]);
   useEffect(() => () => coordinator.dispose(), [coordinator]);
   return coordinator;
 }
@@ -471,6 +523,10 @@ function EditableFileSurface({
   wordWrap,
   onPostRender,
   onPendingChange,
+  onSaveFailure,
+  onSaveConfirmed,
+  onSaveResolutionApplied,
+  saveResolution,
 }: EditableFileSurfaceProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
@@ -492,6 +548,10 @@ function EditableFileSurface({
     relativePath,
     revision,
     onPendingChange,
+    onSaveFailure,
+    onSaveConfirmed,
+    onSaveResolutionApplied,
+    saveResolution,
   });
   const editor = useMemo(
     () =>
@@ -740,6 +800,10 @@ function RenderedMarkdownSurface({
   truncated,
   threadRef,
   onPendingChange,
+  onSaveFailure,
+  onSaveConfirmed,
+  onSaveResolutionApplied,
+  saveResolution,
 }: Omit<
   EditableFileSurfaceProps,
   | "resolvedTheme"
@@ -758,6 +822,10 @@ function RenderedMarkdownSurface({
     relativePath,
     revision,
     onPendingChange,
+    onSaveFailure,
+    onSaveConfirmed,
+    onSaveResolutionApplied,
+    saveResolution,
   });
 
   return (
@@ -830,15 +898,29 @@ export default function FilePreviewPanel({
   const previewKind = resolveFilePreviewKind(relativePath);
   const isImage = previewKind === "image";
   const isPdf = previewKind === "pdf";
-  const file = useProjectFileQuery(
+  const [pendingPaths, setPendingPaths] = useState<ReadonlySet<string>>(() => new Set());
+  const sourcePending = relativePath !== null && pendingPaths.has(relativePath);
+  const {
+    cancelReloadNotice,
+    file,
+    handleSaveConfirmed,
+    handleSaveFailure,
+    handleSaveResolutionApplied,
+    reloadNotice,
+    requestManualReload,
+    requestOverwrite,
+    resolveReloadNotice,
+    saveResolution,
+    viewerRefreshKey,
+  } = useWorkspaceFileRefresh({
     environmentId,
     cwd,
     relativePath,
-    shouldLoadFileAsText(relativePath),
-  );
+    loadAsText: shouldLoadFileAsText(relativePath),
+    sourcePending,
+  });
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
   const [pdfExplorerOpen, setPdfExplorerOpen] = useState(false);
-  const [pendingPaths, setPendingPaths] = useState<ReadonlySet<string>>(() => new Set());
   const effectiveExplorerOpen = isPdf ? pdfExplorerOpen : explorerOpen;
   // Reading markdown rendered is a preference, not a property of one file. Keeping
   // it on the panel meant a thread switch dropped it and forced source back.
@@ -893,7 +975,6 @@ export default function FilePreviewPanel({
     },
     [onPendingChange],
   );
-
   useEffect(() => {
     const currentCrumb = breadcrumbRef.current?.querySelector<HTMLElement>(
       "[data-current-file-crumb='true']",
@@ -1034,6 +1115,7 @@ export default function FilePreviewPanel({
               <TooltipPopup>Open file in preview browser</TooltipPopup>
             </Tooltip>
           ) : null}
+          <ScientFileReloadButton isPending={file.isPending} onReload={requestManualReload} />
           <Tooltip>
             <TooltipTrigger
               render={
@@ -1055,6 +1137,16 @@ export default function FilePreviewPanel({
           </Tooltip>
         </div>
       ) : null}
+      <ScientFileFreshnessNotices
+        relativePath={relativePath}
+        notice={reloadNotice}
+        readError={file.error}
+        hasFallbackData={file.data !== null}
+        onCancel={cancelReloadNotice}
+        onReload={requestManualReload}
+        onRequestOverwrite={requestOverwrite}
+        onResolve={resolveReloadNotice}
+      />
       {relativePath && !isPdf && file.data?.truncated ? (
         <div className="shrink-0 border-b border-warning/20 bg-warning-surface px-3 py-1.5 text-[11px] text-warning-foreground">
           Read-only preview limited to the first 1 MB of a {file.data.byteLength.toLocaleString()}{" "}
@@ -1075,6 +1167,7 @@ export default function FilePreviewPanel({
               threadRef={threadRef}
               absolutePath={absolutePath}
               alt={relativePath}
+              refreshKey={viewerRefreshKey}
             />
           ) : relativePath && isPdf && absolutePath && pdfSource ? (
             <Suspense
@@ -1084,7 +1177,11 @@ export default function FilePreviewPanel({
                 </div>
               }
             >
-              <ScientPdfReader key={absolutePath} source={pdfSource} />
+              <ScientPdfReader
+                key={absolutePath}
+                source={pdfSource}
+                refreshKey={viewerRefreshKey}
+              />
             </Suspense>
           ) : relativePath && file.error && file.data === null ? (
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
@@ -1105,6 +1202,10 @@ export default function FilePreviewPanel({
                 revision={file.data.revision}
                 truncated={file.data.truncated}
                 onPendingChange={handlePendingChange}
+                onSaveFailure={handleSaveFailure}
+                onSaveConfirmed={handleSaveConfirmed}
+                onSaveResolutionApplied={handleSaveResolutionApplied}
+                saveResolution={saveResolution}
               />
             ) : file.data.truncated ? (
               <Virtualizer
@@ -1147,15 +1248,20 @@ export default function FilePreviewPanel({
                 wordWrap={wordWrap}
                 onPostRender={onFilePostRender}
                 onPendingChange={handlePendingChange}
+                onSaveFailure={handleSaveFailure}
+                onSaveConfirmed={handleSaveConfirmed}
+                onSaveResolutionApplied={handleSaveResolutionApplied}
+                saveResolution={saveResolution}
               />
             )
           ) : null}
           <ScientFileAuxiliarySurface
             environmentId={environmentId}
+            threadRef={threadRef}
             cwd={cwd}
             relativePath={relativePath}
             sourceRevision={file.data?.revision ?? null}
-            sourcePending={relativePath !== null && pendingPaths.has(relativePath)}
+            sourcePending={sourcePending}
             truncated={file.data?.truncated ?? false}
           />
         </div>

@@ -61,4 +61,34 @@ describe("previewMiniPlayerStore", () => {
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
     ).toMatchObject({ tabId: "tab-b", size: { width: 480, height: 320 } });
   });
+
+  it("opens a floating preview at an explicit drag-drop position", () => {
+    usePreviewMiniPlayerStore.getState().open(refA, "tab-a", { x: 180, y: 96 });
+
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toEqual({ tabId: "tab-a", position: { x: 180, y: 96 }, size: null });
+  });
+
+  it("updates resize position and size atomically", () => {
+    usePreviewMiniPlayerStore.getState().open(refA, "tab-a");
+    let updateCount = 0;
+    const unsubscribe = usePreviewMiniPlayerStore.subscribe(() => {
+      updateCount += 1;
+    });
+    usePreviewMiniPlayerStore.getState().setRect(refA, "tab-a", {
+      position: { x: 80, y: 64 },
+      size: { width: 520, height: 360 },
+    });
+    unsubscribe();
+
+    expect(updateCount).toBe(1);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toEqual({
+      tabId: "tab-a",
+      position: { x: 80, y: 64 },
+      size: { width: 520, height: 360 },
+    });
+  });
 });

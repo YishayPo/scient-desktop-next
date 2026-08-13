@@ -308,7 +308,7 @@ it.effect("VAL-MIGRATE-13: lifecycle operations work on migrated prototype rows"
       const executed = yield* runScientMigrations(sql);
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [3, 4],
+        [3, 4, 5, 6, 7],
       );
 
       // 3. Verify listRecoverableForks selects exactly pending/provisioning/failed
@@ -642,7 +642,7 @@ it.effect("VAL-CROSS-002: prototype upgrade normalizes rows and supports reposit
       const executed = yield* runScientMigrations(sql);
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [3, 4],
+        [3, 4, 5, 6, 7],
       );
 
       // 3. Verify identity is preserved (no loss or fabrication).
@@ -706,7 +706,7 @@ it.effect("VAL-CROSS-002: prototype upgrade normalizes rows and supports reposit
         readonly created_at: string;
         readonly applied_at: string;
       }>`SELECT migration_id, name, created_at, applied_at FROM scient_schema_migrations ORDER BY migration_id`;
-      assert.strictEqual(ledger.length, 4);
+      assert.strictEqual(ledger.length, 7);
       assert.strictEqual(ledger[0]!.migration_id, 1);
       assert.strictEqual(ledger[0]!.name, "durable-thread-forks");
       assert.strictEqual(ledger[0]!.applied_at, "2026-07-01T10:00:00.000Z");
@@ -1268,7 +1268,7 @@ it.effect("VAL-CROSS-008: running Scient first then T3 leaves both ledgers intac
       assert.isTrue(t3Ledger.length > 0);
       assert.deepStrictEqual(
         scientLedger.map((r) => r.migration_id),
-        [1, 2, 3, 4],
+        [1, 2, 3, 4, 5, 6, 7],
       );
 
       // T3 ledger does not contain Scient migration names.

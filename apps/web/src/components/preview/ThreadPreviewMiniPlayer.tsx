@@ -17,6 +17,8 @@ import {
   clampPreviewMiniPlayerPosition,
   clampPreviewMiniPlayerSize,
   PREVIEW_MINI_PLAYER_DEFAULT_SIZE,
+  type PreviewMiniPlayerResizeDirection,
+  resizePreviewMiniPlayerRect,
 } from "./previewMiniPlayerLayout";
 
 interface DragState {
@@ -31,9 +33,59 @@ interface ResizeState {
   readonly pointerId: number;
   readonly pointerX: number;
   readonly pointerY: number;
+  readonly direction: PreviewMiniPlayerResizeDirection;
+  readonly playerX: number;
+  readonly playerY: number;
   readonly width: number;
   readonly height: number;
 }
+
+const RESIZE_HANDLES: ReadonlyArray<{
+  readonly direction: PreviewMiniPlayerResizeDirection;
+  readonly label: string;
+  readonly className: string;
+}> = [
+  {
+    direction: "nw",
+    label: "top left",
+    className: "left-0 top-0 size-4 cursor-nwse-resize",
+  },
+  {
+    direction: "n",
+    label: "top",
+    className: "left-4 right-4 top-0 h-2 cursor-ns-resize",
+  },
+  {
+    direction: "ne",
+    label: "top right",
+    className: "right-0 top-0 size-4 cursor-nesw-resize",
+  },
+  {
+    direction: "e",
+    label: "right",
+    className: "bottom-4 right-0 top-4 w-2 cursor-ew-resize",
+  },
+  {
+    direction: "se",
+    label: "bottom right",
+    className: "bottom-0 right-0 size-4 cursor-nwse-resize",
+  },
+  {
+    direction: "s",
+    label: "bottom",
+    className: "bottom-0 left-4 right-4 h-2 cursor-ns-resize",
+  },
+  {
+    direction: "sw",
+    label: "bottom left",
+    className: "bottom-0 left-0 size-4 cursor-nesw-resize",
+  },
+  {
+    direction: "w",
+    label: "left",
+    className: "bottom-4 left-0 top-4 w-2 cursor-ew-resize",
+  },
+];
 
 interface Props {
   readonly threadRef: ScopedThreadRef;
@@ -90,14 +142,17 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
         { width: parent.clientWidth, height: parent.clientHeight },
         bottomInset,
       );
-      usePreviewMiniPlayerStore.getState().resize(threadRef, tabId, nextSize);
+      const store = usePreviewMiniPlayerStore.getState();
+      const current = selectThreadPreviewMiniPlayer(store.byThreadKey, threadRef);
       const next = clampPreviewMiniPlayerPosition(
-        position ?? { x: root.offsetLeft, y: root.offsetTop },
+        current?.tabId === tabId && current.position
+          ? current.position
+          : { x: root.offsetLeft, y: root.offsetTop },
         { width: parent.clientWidth, height: parent.clientHeight },
         nextSize,
         bottomInset,
       );
-      usePreviewMiniPlayerStore.getState().move(threadRef, tabId, next);
+      store.setRect(threadRef, tabId, { position: next, size: nextSize });
     };
     clampAndMove();
     const root = rootRef.current;
@@ -109,7 +164,7 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
     observer.observe(root);
     observer.observe(parent);
     return () => observer.disconnect();
-  }, [bottomInset, position, tabId, threadRef]);
+  }, [bottomInset, tabId, threadRef]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -156,14 +211,23 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
     }
   };
 
-  const handleResizePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const handleResizePointerDown = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    direction: PreviewMiniPlayerResizeDirection,
+  ) => {
     if (event.button !== 0) return;
     const root = rootRef.current;
-    if (!root) return;
+    const parent = root?.offsetParent;
+    if (!root || !(parent instanceof HTMLElement)) return;
+    const rootRect = root.getBoundingClientRect();
+    const parentRect = parent.getBoundingClientRect();
     resizeRef.current = {
       pointerId: event.pointerId,
       pointerX: event.clientX,
       pointerY: event.clientY,
+      direction,
+      playerX: rootRect.left - parentRect.left,
+      playerY: rootRect.top - parentRect.top,
       width: root.offsetWidth,
       height: root.offsetHeight,
     };
@@ -184,22 +248,20 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
     ) {
       return;
     }
-    const nextSize = clampPreviewMiniPlayerSize(
-      {
-        width: resize.width + event.clientX - resize.pointerX,
-        height: resize.height + event.clientY - resize.pointerY,
+    const next = resizePreviewMiniPlayerRect({
+      rect: {
+        position: { x: resize.playerX, y: resize.playerY },
+        size: { width: resize.width, height: resize.height },
       },
-      { width: parent.clientWidth, height: parent.clientHeight },
+      direction: resize.direction,
+      delta: {
+        x: event.clientX - resize.pointerX,
+        y: event.clientY - resize.pointerY,
+      },
+      container: { width: parent.clientWidth, height: parent.clientHeight },
       bottomInset,
-    );
-    usePreviewMiniPlayerStore.getState().resize(threadRef, tabId, nextSize);
-    const nextPosition = clampPreviewMiniPlayerPosition(
-      position ?? { x: root.offsetLeft, y: root.offsetTop },
-      { width: parent.clientWidth, height: parent.clientHeight },
-      nextSize,
-      bottomInset,
-    );
-    usePreviewMiniPlayerStore.getState().move(threadRef, tabId, nextPosition);
+    });
+    usePreviewMiniPlayerStore.getState().setRect(threadRef, tabId, next);
   };
 
   const endResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -299,16 +361,19 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
             Reconnecting preview…
           </div>
         ) : null}
-        <button
-          type="button"
-          aria-label="Resize floating preview"
-          title="Resize floating preview"
-          className="pointer-events-auto absolute bottom-0 right-0 z-[33] size-5 cursor-nwse-resize rounded-br-xl after:absolute after:bottom-1 after:right-1 after:size-2 after:border-b after:border-r after:border-foreground/45"
-          onPointerDown={handleResizePointerDown}
-          onPointerMove={handleResizePointerMove}
-          onPointerUp={endResize}
-          onPointerCancel={endResize}
-        />
+        {RESIZE_HANDLES.map((handle) => (
+          <button
+            key={handle.direction}
+            type="button"
+            aria-label={`Resize floating preview from ${handle.label}`}
+            title={`Resize from ${handle.label}`}
+            className={`pointer-events-auto absolute z-[33] touch-none ${handle.className}`}
+            onPointerDown={(event) => handleResizePointerDown(event, handle.direction)}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+          />
+        ))}
       </div>
     </section>
   );

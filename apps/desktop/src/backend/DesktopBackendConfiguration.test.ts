@@ -292,6 +292,7 @@ describe("DesktopBackendConfiguration", () => {
         assert.notInclude(config.args, "bash");
         assert.notInclude(config.args, "/bin/sh");
         assert.notInclude(config.args, "-c");
+        assert.equal(config.env.SCIENT_NEXT_DEVELOPMENT_STATE, "true");
         assert.isTrue(Option.isNone(config.preflightFailure));
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -474,7 +475,7 @@ describe("DesktopBackendConfiguration", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("resolvePrimary captures backend output in dev so child logs can be persisted", () =>
+  it.effect("resolvePrimary pins development state and URL in the backend child", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
@@ -485,6 +486,8 @@ describe("DesktopBackendConfiguration", () => {
         const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
         const config = yield* configuration.resolvePrimary;
         assert.equal(config.captureOutput, true);
+        assert.equal(config.env.SCIENT_NEXT_DEVELOPMENT_STATE, "true");
+        assert.deepEqual(config.args.slice(-2), ["--dev-url", "http://127.0.0.1:5733/"]);
       }).pipe(
         Effect.provide(
           DesktopBackendConfiguration.layer.pipe(
@@ -545,7 +548,7 @@ describe("DesktopBackendConfiguration", () => {
           // already declared, so it isn't forwarded twice.
           assert.equal(
             config.env.WSLENV,
-            "GOPATH/p:OPENAI_API_KEY/u:EMPTY::AZURE_DEVOPS_EXT_PAT/u:T3CODE_HOME:SCIENT_NEXT_HOME:SCIENT_NEXT_SAFETY_ENVELOPE:ANTHROPIC_API_KEY",
+            "GOPATH/p:OPENAI_API_KEY/u:EMPTY::AZURE_DEVOPS_EXT_PAT/u:T3CODE_HOME:SCIENT_NEXT_HOME:SCIENT_NEXT_DEVELOPMENT_STATE:SCIENT_NEXT_SAFETY_ENVELOPE:ANTHROPIC_API_KEY",
           );
         }).pipe(
           Effect.provide(

@@ -52,6 +52,8 @@ import {
   AssetGeneratedDocumentAuthorityMismatchError,
   AssetGeneratedDocumentNotFoundError,
   AssetGeneratedDocumentResolutionError,
+  AssetAnalysisArtifactNotFoundError,
+  AssetAnalysisArtifactResolutionError,
   RpcClientId,
   EnvironmentAuthorizationError,
   ThreadId,
@@ -1929,6 +1931,21 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "workspace" },
           ),
+        [WS_METHODS.projectsSubscribeFileChanges]: (input) =>
+          observeRpcStream(
+            WS_METHODS.projectsSubscribeFileChanges,
+            workspaceFileSystem.watchFile(input).pipe(
+              Stream.mapError(
+                (cause) =>
+                  new ProjectReadFileError({
+                    ...input,
+                    ...projectFileFailureContext(cause),
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
         [WS_METHODS.projectsWriteFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsWriteFile,
@@ -1953,6 +1970,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.analysisConfigureRuntime, analysis.configureRuntime(input), {
             "rpc.aggregate": "analysis",
           }),
+        [WS_METHODS.analysisVerifyRuntime]: (input) =>
+          observeRpcEffect(WS_METHODS.analysisVerifyRuntime, analysis.verifyRuntime(input), {
+            "rpc.aggregate": "analysis",
+          }),
         [WS_METHODS.analysisStartRun]: (input) =>
           observeRpcEffect(WS_METHODS.analysisStartRun, analysis.startRun(input), {
             "rpc.aggregate": "analysis",
@@ -1967,6 +1988,18 @@ const makeWsRpcLayer = (
           }),
         [WS_METHODS.analysisGetRun]: (input) =>
           observeRpcEffect(WS_METHODS.analysisGetRun, analysis.getRun(input), {
+            "rpc.aggregate": "analysis",
+          }),
+        [WS_METHODS.analysisStorageSummary]: (input) =>
+          observeRpcEffect(WS_METHODS.analysisStorageSummary, analysis.storageSummary(input), {
+            "rpc.aggregate": "analysis",
+          }),
+        [WS_METHODS.analysisCleanupRun]: (input) =>
+          observeRpcEffect(WS_METHODS.analysisCleanupRun, analysis.cleanupRun(input), {
+            "rpc.aggregate": "analysis",
+          }),
+        [WS_METHODS.analysisCleanupProject]: (input) =>
+          observeRpcEffect(WS_METHODS.analysisCleanupProject, analysis.cleanupProject(input), {
             "rpc.aggregate": "analysis",
           }),
         [WS_METHODS.subscribeAnalysisRuns]: (input) =>
@@ -1996,6 +2029,23 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.assetsCreateUrl,
             Effect.gen(function* () {
+              if (input.resource._tag === "analysis-artifact") {
+                const analysisArtifact = yield* analysis.resolveArtifact(input.resource).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new AssetAnalysisArtifactResolutionError({
+                        resource: input.resource,
+                        cause,
+                      }),
+                  ),
+                );
+                if (analysisArtifact === null) {
+                  return yield* new AssetAnalysisArtifactNotFoundError({
+                    resource: input.resource,
+                  });
+                }
+                return yield* issueAssetUrl({ resource: input.resource, analysisArtifact });
+              }
               if (input.resource._tag === "generated-document") {
                 const generatedDocument = yield* generatedDocuments
                   .resolveRevision(input.resource)

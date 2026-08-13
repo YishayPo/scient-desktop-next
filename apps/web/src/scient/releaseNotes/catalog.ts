@@ -9,6 +9,40 @@ import type { ScientReleaseNote } from "./model";
  */
 export const SCIENT_RELEASE_NOTES = [
   {
+    version: "0.6.3",
+    publishedAt: "2026-08-13",
+    kicker: "Complete source intake and a stronger everyday workspace",
+    headline: "Scient 0.6.3",
+    summary:
+      "This release completes the first Sources intake workflow and brings a broad set of focused workspace improvements from the maintained T3 foundation.",
+    highlights: [
+      {
+        id: "complete-source-intake",
+        title: "Bring research sources into Scient more reliably",
+        description:
+          "Import local PDFs, selected Zotero references, collections, or a whole local library through clearer, recoverable workflows with stronger duplicate and metadata handling.",
+      },
+      {
+        id: "source-awareness",
+        title: "Let agents work with your project library",
+        description:
+          "Agents can now inspect the active project's source list and bounded reference details without exposing attachment paths or sources from another project.",
+      },
+      {
+        id: "pull-request-workspace",
+        title: "A more capable pull-request workspace",
+        description:
+          "Filter and review pull requests, inspect checks and smarter diffs, update branches, edit details, and work with reactions across supported source-control providers.",
+      },
+      {
+        id: "workspace-polish-and-reliability",
+        title: "More room for content and fewer interruptions",
+        description:
+          "File previews open content-first, restored non-PDF tabs no longer crash the workspace, and composer, sidebar, theme, diff, OAuth, and mobile interactions receive focused refinements.",
+      },
+    ],
+  },
+  {
     version: "0.6.2",
     publishedAt: "2026-08-13",
     kicker: "Sources, citations, and stronger scientific documents",

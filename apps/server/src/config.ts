@@ -50,6 +50,7 @@ export interface ServerDerivedPaths {
 export interface DeriveServerPathsOptions {
   readonly baseDirIsExplicit?: boolean;
   readonly developmentStateDirName?: string;
+  readonly forceDevelopmentState?: boolean;
 }
 
 /**
@@ -107,7 +108,7 @@ export const deriveServerPaths = Effect.fn(function* (
   const { join } = yield* Path.Path;
   const stateDir = join(
     baseDir,
-    devUrl !== undefined && !options.baseDirIsExplicit
+    options.forceDevelopmentState || (devUrl !== undefined && !options.baseDirIsExplicit)
       ? (options.developmentStateDirName ?? "dev")
       : "userdata",
   );

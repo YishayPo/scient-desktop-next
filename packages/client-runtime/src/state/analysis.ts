@@ -11,42 +11,84 @@ import {
   createEnvironmentRpcSubscriptionAtomFamily,
 } from "./runtime.ts";
 
+const MAXIMUM_TERMINAL_SUBSCRIPTION_RUNS = 32;
+
+function isTerminalRun(run: AnalysisRunSnapshot): boolean {
+  return ["succeeded", "failed", "cancelled", "lost"].includes(run.receipt.status);
+}
+
+function setBoundedRun(
+  runs: ReadonlyMap<string, AnalysisRunSnapshot>,
+  run: AnalysisRunSnapshot,
+): ReadonlyMap<string, AnalysisRunSnapshot> {
+  const next = new Map(runs);
+  next.set(run.receipt.runId, run);
+  const terminal = [...next.values()]
+    .filter(isTerminalRun)
+    .toSorted((left, right) => right.receipt.startedAt.localeCompare(left.receipt.startedAt));
+  for (const expired of terminal.slice(MAXIMUM_TERMINAL_SUBSCRIPTION_RUNS)) {
+    next.delete(expired.receipt.runId);
+  }
+  return next;
+}
+
 export function applyAnalysisRunStreamEvent(
   runs: ReadonlyMap<string, AnalysisRunSnapshot>,
   event: AnalysisRunStreamEvent,
 ): ReadonlyMap<string, AnalysisRunSnapshot> {
-  const next = new Map(runs);
   if (event._tag === "run-snapshot") {
-    next.set(event.run.receipt.runId, event.run);
-    return next;
+    return setBoundedRun(runs, event.run);
   }
   if (event._tag === "run-updated") {
-    const current = next.get(event.run.receipt.runId);
-    next.set(event.run.receipt.runId, {
+    const current = runs.get(event.run.receipt.runId);
+    return setBoundedRun(runs, {
       ...event.run,
       receipt: {
         ...event.run.receipt,
         output: current?.receipt.output ?? [],
       },
     });
-    return next;
   }
-  const current = next.get(event.runId);
-  if (!current) return next;
-  const knownSequences = new Set(current.receipt.output.map((chunk) => chunk.sequence));
-  next.set(event.runId, {
+  const current = runs.get(event.runId);
+  if (!current) return runs;
+  const currentOutput = current.receipt.output;
+  const lastSequence = currentOutput.at(-1)?.sequence ?? -1;
+  const appendOnly = event.chunks.every(
+    (chunk, index) => chunk.sequence > (event.chunks[index - 1]?.sequence ?? lastSequence),
+  );
+  let output: AnalysisRunSnapshot["receipt"]["output"];
+  if (appendOnly) {
+    output = event.chunks.length === 0 ? currentOutput : [...currentOutput, ...event.chunks];
+  } else {
+    const knownSequences = new Set(currentOutput.map((chunk) => chunk.sequence));
+    const newChunks = event.chunks.flatMap((chunk) => {
+      if (knownSequences.has(chunk.sequence)) return [];
+      knownSequences.add(chunk.sequence);
+      return [chunk];
+    });
+    output =
+      newChunks.length === 0
+        ? currentOutput
+        : [...currentOutput, ...newChunks].toSorted(
+            (left, right) => left.sequence - right.sequence,
+          );
+  }
+  if (
+    output === currentOutput &&
+    current.receipt.outputTruncated === event.outputTruncated &&
+    current.receipt.outputByteLength === event.outputByteLength
+  ) {
+    return runs;
+  }
+  return setBoundedRun(runs, {
     ...current,
     receipt: {
       ...current.receipt,
-      output: [
-        ...current.receipt.output,
-        ...event.chunks.filter((chunk) => !knownSequences.has(chunk.sequence)),
-      ].toSorted((left, right) => left.sequence - right.sequence),
+      output,
       outputTruncated: event.outputTruncated,
       outputByteLength: event.outputByteLength,
     },
   });
-  return next;
 }
 
 export function createAnalysisEnvironmentAtoms<R, E>(
@@ -54,6 +96,7 @@ export function createAnalysisEnvironmentAtoms<R, E>(
 ) {
   const runScheduler = createAtomCommandScheduler();
   const runtimeScheduler = createAtomCommandScheduler();
+  const cleanupScheduler = createAtomCommandScheduler();
   return {
     runtimes: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:analysis:runtimes",
@@ -63,13 +106,21 @@ export function createAnalysisEnvironmentAtoms<R, E>(
     runs: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:analysis:runs",
       tag: WS_METHODS.analysisListRuns,
-      staleTimeMs: 5_000,
+      // A live subscription owns in-panel updates, but it is intentionally
+      // discarded on unmount. Always revalidate when a file panel remounts so
+      // an older pre-completion history snapshot cannot hide persisted artifacts.
+      staleTimeMs: 0,
     }),
     run: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:analysis:run",
       tag: WS_METHODS.analysisGetRun,
       staleTimeMs: 30_000,
       idleTtlMs: 60_000,
+    }),
+    storage: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:analysis:storage",
+      tag: WS_METHODS.analysisStorageSummary,
+      staleTimeMs: 0,
     }),
     runEvents: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:analysis:run-events",
@@ -95,6 +146,16 @@ export function createAnalysisEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.cwd, input.runtimeKind]),
       },
     }),
+    verifyRuntime: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:analysis:verify-runtime",
+      tag: WS_METHODS.analysisVerifyRuntime,
+      scheduler: runtimeScheduler,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.cwd, input.runtimeId]),
+      },
+    }),
     startRun: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:analysis:start-run",
       tag: WS_METHODS.analysisStartRun,
@@ -112,6 +173,24 @@ export function createAnalysisEnvironmentAtoms<R, E>(
       concurrency: {
         mode: "singleFlight",
         key: ({ environmentId, input }) => JSON.stringify([environmentId, input.runId]),
+      },
+    }),
+    cleanupRun: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:analysis:cleanup-run",
+      tag: WS_METHODS.analysisCleanupRun,
+      scheduler: cleanupScheduler,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.runId]),
+      },
+    }),
+    cleanupProject: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:analysis:cleanup-project",
+      tag: WS_METHODS.analysisCleanupProject,
+      scheduler: cleanupScheduler,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.cwd]),
       },
     }),
   };

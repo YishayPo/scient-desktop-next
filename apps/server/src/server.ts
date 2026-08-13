@@ -131,6 +131,7 @@ import * as ProviderRuntimeManager from "./scient/providerLifecycle/ProviderRunt
 import * as GeneratedDocumentStore from "./scient/documentArtifacts/GeneratedDocumentStore.ts";
 import * as AnalysisService from "./scient/analysis/AnalysisService.ts";
 import * as LocalAnalysisStore from "./scient/analysis/LocalAnalysisStore.ts";
+import * as AnalysisRunIndex from "./scient/analysis/AnalysisRunIndex.ts";
 import * as LocalExecutionProcess from "./scient/execution/LocalExecutionProcess.ts";
 import { scientProjectHttpApiLayer } from "./scientProject/http.ts";
 import { scientSourcesHttpApiLayer } from "./scient/sources/http.ts";
@@ -474,8 +475,11 @@ const PullRequestServiceLive = PullRequestService.layer.pipe(
   Layer.provide(VcsProcess.layer),
 );
 
+const AnalysisRunIndexLive = AnalysisRunIndex.layer.pipe(Layer.provide(PersistenceLayerLive));
+
 const AnalysisServiceLive = AnalysisService.layer.pipe(
   Layer.provide(LocalAnalysisStore.layer),
+  Layer.provide(AnalysisRunIndexLive),
   Layer.provide(LocalExecutionProcess.layer),
 );
 

@@ -65,6 +65,25 @@ const QuarantinePayloadEvidence = Schema.fromJsonString(
 );
 const decodeQuarantinePayload = Schema.decodeSync(QuarantinePayloadEvidence);
 
+const SCIENT_MIGRATION_IDS = [1, 2, 3, 4, 5, 6, 7];
+const SCIENT_MIGRATION_NAMES = [
+  "durable-thread-forks",
+  "durable-provider-bootstrap",
+  "normalize-active-lineage",
+  "quarantine-invalid-lineage",
+  "analysis-run-index",
+  "analysis-run-projection-state",
+  "analysis-run-storage-status",
+];
+const SCIENT_MIGRATIONS_AFTER_BOOTSTRAP = SCIENT_MIGRATION_IDS.slice(2);
+
+/** Restore the schema boundary immediately before migration 4. */
+const removePostMigrationThreeAnalysisSchema = (sql: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    yield* sql`DROP TABLE IF EXISTS scient_analysis_run_index_state`;
+    yield* sql`DROP TABLE IF EXISTS scient_analysis_run_index`;
+  });
+
 // ---------------------------------------------------------------------------
 // VAL-MIGRATE-01: Fresh install creates canonical Scient schema
 // ---------------------------------------------------------------------------
@@ -78,7 +97,7 @@ it.effect("fresh install creates canonical Scient schema with ledger and indexes
       // All migrations ran in order.
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [1, 2, 3, 4],
+        SCIENT_MIGRATION_IDS,
       );
 
       // Ledger exists with all migrations (created_at, no applied_at).
@@ -87,19 +106,14 @@ it.effect("fresh install creates canonical Scient schema with ledger and indexes
         readonly name: string;
         readonly created_at: string;
       }>`SELECT migration_id, name, created_at FROM scient_schema_migrations ORDER BY migration_id`;
-      assert.strictEqual(ledger.length, 4);
+      assert.strictEqual(ledger.length, SCIENT_MIGRATION_IDS.length);
       assert.deepStrictEqual(
         ledger.map((row) => row.migration_id),
-        [1, 2, 3, 4],
+        SCIENT_MIGRATION_IDS,
       );
       assert.deepStrictEqual(
         ledger.map((row) => row.name),
-        [
-          "durable-thread-forks",
-          "durable-provider-bootstrap",
-          "normalize-active-lineage",
-          "quarantine-invalid-lineage",
-        ],
+        SCIENT_MIGRATION_NAMES,
       );
       assert.isTrue(ledger.every((row) => row.created_at.length > 0));
 
@@ -153,6 +167,46 @@ it.effect("fresh install creates canonical Scient schema with ledger and indexes
           `Missing quarantine column: ${required}`,
         );
       }
+
+      const analysisColumns = yield* tableInfo(sql, "scient_analysis_run_index");
+      const analysisColumnNames = new Set(analysisColumns.map((column) => column.name));
+      for (const required of [
+        "project_id",
+        "run_id",
+        "relative_path",
+        "source_revision",
+        "runtime_id",
+        "runtime_release",
+        "action",
+        "status",
+        "finished_at",
+        "artifact_count",
+        "diagnostic_count",
+        "retained_output_bytes",
+        "retained_artifact_bytes",
+        "retained_bytes",
+        "storage_status",
+        "summary_json",
+      ]) {
+        assert.isTrue(
+          analysisColumnNames.has(required),
+          `Missing analysis index column: ${required}`,
+        );
+      }
+      const analysisIndexes = new Set(
+        (yield* indexList(sql, "scient_analysis_run_index")).map((index) => index.name),
+      );
+      for (const required of [
+        "scient_analysis_run_index_project_started",
+        "scient_analysis_run_index_file_started",
+        "scient_analysis_run_index_storage",
+      ]) {
+        assert.isTrue(analysisIndexes.has(required), `Missing analysis index: ${required}`);
+      }
+      assert.deepStrictEqual(
+        (yield* tableInfo(sql, "scient_analysis_run_index_state")).map((column) => column.name),
+        ["project_id", "revision", "clean", "indexed_at"],
+      );
     }),
   ),
 );
@@ -349,10 +403,10 @@ it.effect("legacy ledger IDs 1/2 with names and timestamps remain intact", () =>
 
       const executed = yield* runScientMigrations(sql);
 
-      // Migrations 3 and 4 ran (1 and 2 were already in the ledger).
+      // Migrations 3 through 7 ran (1 and 2 were already in the ledger).
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [3, 4],
+        SCIENT_MIGRATIONS_AFTER_BOOTSTRAP,
       );
 
       // Legacy entries preserved with both applied_at and created_at.
@@ -362,7 +416,7 @@ it.effect("legacy ledger IDs 1/2 with names and timestamps remain intact", () =>
         readonly created_at: string;
         readonly applied_at: string;
       }>`SELECT migration_id, name, created_at, applied_at FROM scient_schema_migrations ORDER BY migration_id`;
-      assert.strictEqual(ledger.length, 4);
+      assert.strictEqual(ledger.length, SCIENT_MIGRATION_IDS.length);
 
       assert.strictEqual(ledger[0]!.migration_id, 1);
       assert.strictEqual(ledger[0]!.name, "durable-thread-forks");
@@ -379,6 +433,12 @@ it.effect("legacy ledger IDs 1/2 with names and timestamps remain intact", () =>
       assert.isTrue(ledger[2]!.created_at.length > 0);
       assert.strictEqual(ledger[3]!.migration_id, 4);
       assert.strictEqual(ledger[3]!.name, "quarantine-invalid-lineage");
+      assert.strictEqual(ledger[4]!.migration_id, 5);
+      assert.strictEqual(ledger[4]!.name, "analysis-run-index");
+      assert.strictEqual(ledger[5]!.migration_id, 6);
+      assert.strictEqual(ledger[5]!.name, "analysis-run-projection-state");
+      assert.strictEqual(ledger[6]!.migration_id, 7);
+      assert.strictEqual(ledger[6]!.name, "analysis-run-storage-status");
     }),
   ),
 );
@@ -423,6 +483,9 @@ it.effect("only unapplied migrations run in ascending order", () =>
           [2, "durable-provider-bootstrap"],
           [3, "normalize-active-lineage"],
           [4, "quarantine-invalid-lineage"],
+          [5, "analysis-run-index"],
+          [6, "analysis-run-projection-state"],
+          [7, "analysis-run-storage-status"],
         ] as const,
       );
 
@@ -431,7 +494,7 @@ it.effect("only unapplied migrations run in ascending order", () =>
       `;
       assert.deepStrictEqual(
         ledger.map((row) => row.migration_id),
-        [1, 2, 3, 4],
+        SCIENT_MIGRATION_IDS,
       );
     }),
   ),
@@ -515,7 +578,7 @@ it.effect("malformed rows are quarantined with evidence while valid rows normali
       const executed = yield* runScientMigrations(sql);
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [3, 4],
+        SCIENT_MIGRATIONS_AFTER_BOOTSTRAP,
       );
 
       // Migration 3 is recorded.
@@ -524,7 +587,7 @@ it.effect("malformed rows are quarantined with evidence while valid rows normali
       `;
       assert.deepStrictEqual(
         ledger.map((row) => row.migration_id),
-        [1, 2, 3, 4],
+        SCIENT_MIGRATION_IDS,
       );
 
       // The malformed row was quarantined out of active recovery; the valid
@@ -580,7 +643,7 @@ it.effect("second clean run returns empty with no schema changes", () =>
       const sql = yield* SqlClient.SqlClient;
 
       const firstRun = yield* runScientMigrations(sql);
-      assert.strictEqual(firstRun.length, 4);
+      assert.strictEqual(firstRun.length, SCIENT_MIGRATION_IDS.length);
 
       const beforeColumns = yield* tableInfo(sql, "scient_thread_lineage");
       const beforeLedger = yield* sql<{ readonly migration_id: number }>`
@@ -613,7 +676,7 @@ it.effect("quarantine is durable across idempotent reruns", () =>
       const first = yield* runScientMigrations(sql);
       assert.deepStrictEqual(
         first.map(([id]) => id),
-        [3, 4],
+        SCIENT_MIGRATIONS_AFTER_BOOTSTRAP,
       );
 
       const quarantinedBefore = yield* sql<{
@@ -648,7 +711,8 @@ it.effect("migration 4 repairs databases that already recorded migration 3", () 
 
       // Reproduce the released development state: migration 3 is recorded,
       // but its later quarantine implementation never ran for this database.
-      yield* sql`DELETE FROM scient_schema_migrations WHERE migration_id = 4`;
+      yield* sql`DELETE FROM scient_schema_migrations WHERE migration_id >= 4`;
+      yield* removePostMigrationThreeAnalysisSchema(sql);
       yield* sql`DROP TABLE scient_thread_lineage_quarantine`;
       yield* sql`
         INSERT INTO scient_thread_lineage (
@@ -670,7 +734,7 @@ it.effect("migration 4 repairs databases that already recorded migration 3", () 
       const executed = yield* runScientMigrations(sql);
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [4],
+        [4, 5, 6, 7],
       );
 
       const active = yield* sql<{ readonly thread_id: string }>`
@@ -694,7 +758,8 @@ it.effect("migration 4 upgrades the legacy quarantine without losing evidence", 
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runScientMigrations(sql);
-      yield* sql`DELETE FROM scient_schema_migrations WHERE migration_id = 4`;
+      yield* sql`DELETE FROM scient_schema_migrations WHERE migration_id >= 4`;
+      yield* removePostMigrationThreeAnalysisSchema(sql);
       yield* sql`DROP TABLE scient_thread_lineage_quarantine`;
       yield* sql`
         CREATE TABLE scient_thread_lineage_quarantine (
@@ -742,7 +807,8 @@ it.effect("migration 4 quarantines decoder-invalid rows by rowid", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runScientMigrations(sql);
-      yield* sql`DELETE FROM scient_schema_migrations WHERE migration_id = 4`;
+      yield* sql`DELETE FROM scient_schema_migrations WHERE migration_id >= 4`;
+      yield* removePostMigrationThreeAnalysisSchema(sql);
 
       yield* sql`
         INSERT INTO scient_thread_lineage (
@@ -856,7 +922,10 @@ it.effect("concurrent runners on the same file apply each migration at most once
           });
 
           const totalApplied = result1.length + result2.length;
-          assert.isTrue(totalApplied <= 4, `Total applied ${totalApplied} exceeds 4`);
+          assert.isTrue(
+            totalApplied <= SCIENT_MIGRATION_IDS.length,
+            `Total applied ${totalApplied} exceeds ${SCIENT_MIGRATION_IDS.length}`,
+          );
 
           // One runner applied all, the other got empty (locked or saw committed state).
           const winner = result1.length >= result2.length ? result1 : result2;
@@ -864,16 +933,16 @@ it.effect("concurrent runners on the same file apply each migration at most once
           assert.isTrue(winner.length > 0, "At least one runner should have applied migrations");
           assert.strictEqual(loser.length, 0);
 
-          // Verify final ledger with a fresh connection: exactly 3 entries.
+          // Verify the final ledger with a fresh connection.
           const verify = Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient;
             const ledger = yield* sql<{ readonly migration_id: number }>`
               SELECT migration_id FROM scient_schema_migrations ORDER BY migration_id
             `;
-            assert.strictEqual(ledger.length, 4);
+            assert.strictEqual(ledger.length, SCIENT_MIGRATION_IDS.length);
             assert.deepStrictEqual(
               ledger.map((row) => row.migration_id),
-              [1, 2, 3, 4],
+              SCIENT_MIGRATION_IDS,
             );
 
             const columns = yield* tableInfo(sql, "scient_thread_lineage");
@@ -922,7 +991,7 @@ it.effect("Scient and T3 migration ledgers remain isolated", () =>
       `;
       assert.deepStrictEqual(
         scientLedger.map((row) => row.migration_id),
-        [1, 2, 3, 4],
+        SCIENT_MIGRATION_IDS,
       );
 
       // Neither ledger contains the other's migration names.
@@ -965,7 +1034,7 @@ it.effect("running Scient migrations first does not affect T3 migrations", () =>
       assert.isTrue(t3Ledger.length > 0);
       assert.deepStrictEqual(
         scientLedger.map((row) => row.migration_id),
-        [1, 2, 3, 4],
+        SCIENT_MIGRATION_IDS,
       );
     }),
   ),
@@ -991,7 +1060,7 @@ it.effect("invalid workspace_mode is quarantined with evidence", () =>
       const executed = yield* runScientMigrations(sql);
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [3, 4],
+        SCIENT_MIGRATIONS_AFTER_BOOTSTRAP,
       );
 
       const ledger = yield* sql<{ readonly migration_id: number }>`
@@ -999,7 +1068,7 @@ it.effect("invalid workspace_mode is quarantined with evidence", () =>
       `;
       assert.deepStrictEqual(
         ledger.map((row) => row.migration_id),
-        [1, 2, 3, 4],
+        SCIENT_MIGRATION_IDS,
       );
 
       const rows = yield* sql<{ readonly thread_id: string }>`
@@ -1032,7 +1101,7 @@ it.effect("null forked_from_thread_id is quarantined without fabrication", () =>
       const executed = yield* runScientMigrations(sql);
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [3, 4],
+        SCIENT_MIGRATIONS_AFTER_BOOTSTRAP,
       );
 
       const rows = yield* sql<{ readonly thread_id: string }>`
@@ -1065,7 +1134,7 @@ it.effect("invalid status is quarantined with evidence", () =>
       const executed = yield* runScientMigrations(sql);
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [3, 4],
+        SCIENT_MIGRATIONS_AFTER_BOOTSTRAP,
       );
 
       const rows = yield* sql<{ readonly thread_id: string }>`
@@ -1349,7 +1418,7 @@ it.effect("applied_at ledger is reconciled to created_at preserving all values",
         readonly applied_at: string;
       }>`SELECT migration_id, name, created_at, applied_at FROM scient_schema_migrations ORDER BY migration_id`;
 
-      assert.strictEqual(ledger.length, 4);
+      assert.strictEqual(ledger.length, SCIENT_MIGRATION_IDS.length);
 
       for (let i = 0; i < legacyData.length; i++) {
         const expected = legacyData[i]!;
@@ -1394,16 +1463,11 @@ it.effect("fresh database uses created_at without applied_at column", () =>
 
       assert.deepStrictEqual(
         ledger.map((row) => row.migration_id),
-        [1, 2, 3, 4],
+        SCIENT_MIGRATION_IDS,
       );
       assert.deepStrictEqual(
         ledger.map((row) => row.name),
-        [
-          "durable-thread-forks",
-          "durable-provider-bootstrap",
-          "normalize-active-lineage",
-          "quarantine-invalid-lineage",
-        ],
+        SCIENT_MIGRATION_NAMES,
       );
       assert.isTrue(ledger.every((row) => row.created_at.length > 0));
     }),
@@ -1465,14 +1529,18 @@ it.effect(
               concurrency: 2,
             });
 
-            // One runner applied migrations 3 and 4; the other got empty.
+            // One runner applied migrations 3 through 7; the other got empty.
             const totalApplied = result1.length + result2.length;
-            assert.isTrue(totalApplied <= 2, `Total applied ${totalApplied} exceeds 2`);
+            assert.isTrue(
+              totalApplied <= SCIENT_MIGRATIONS_AFTER_BOOTSTRAP.length,
+              `Total applied ${totalApplied} exceeds ${SCIENT_MIGRATIONS_AFTER_BOOTSTRAP.length}`,
+            );
             const winner = result1.length >= result2.length ? result1 : result2;
             const loser = result1.length >= result2.length ? result2 : result1;
-            assert.strictEqual(winner.length, 2);
-            assert.strictEqual(winner[0]![0], 3);
-            assert.strictEqual(winner[1]![0], 4);
+            assert.deepStrictEqual(
+              winner.map(([id]) => id),
+              SCIENT_MIGRATIONS_AFTER_BOOTSTRAP,
+            );
             assert.strictEqual(loser.length, 0);
 
             // Verify the final ledger with a fresh connection.
@@ -1487,7 +1555,7 @@ it.effect(
                 readonly applied_at: string;
               }>`SELECT migration_id, name, created_at, applied_at FROM scient_schema_migrations ORDER BY migration_id`;
 
-              assert.strictEqual(ledger.length, 4);
+              assert.strictEqual(ledger.length, SCIENT_MIGRATION_IDS.length);
               assert.strictEqual(ledger[0]!.migration_id, 1);
               assert.strictEqual(ledger[0]!.name, "durable-thread-forks");
               assert.strictEqual(ledger[0]!.applied_at, "2026-07-01T10:00:00.000Z");
@@ -1503,6 +1571,12 @@ it.effect(
               assert.isTrue(ledger[2]!.created_at.length > 0);
               assert.strictEqual(ledger[3]!.migration_id, 4);
               assert.strictEqual(ledger[3]!.name, "quarantine-invalid-lineage");
+              assert.strictEqual(ledger[4]!.migration_id, 5);
+              assert.strictEqual(ledger[4]!.name, "analysis-run-index");
+              assert.strictEqual(ledger[5]!.migration_id, 6);
+              assert.strictEqual(ledger[5]!.name, "analysis-run-projection-state");
+              assert.strictEqual(ledger[6]!.migration_id, 7);
+              assert.strictEqual(ledger[6]!.name, "analysis-run-storage-status");
             }).pipe(Effect.provide(NodeSqliteClient.layer({ filename })));
             yield* verify;
           }),
@@ -1578,9 +1652,10 @@ it.effect("partial reconciliation is recovered on retry without timestamp loss",
       // Retry: the runner should detect both columns exist, skip the ALTER,
       // and still backfill the missing created_at values from applied_at.
       const executed = yield* runScientMigrations(sql);
-      assert.strictEqual(executed.length, 2);
-      assert.strictEqual(executed[0]![0], 3);
-      assert.strictEqual(executed[1]![0], 4);
+      assert.deepStrictEqual(
+        executed.map(([id]) => id),
+        SCIENT_MIGRATIONS_AFTER_BOOTSTRAP,
+      );
 
       // All legacy timestamps are preserved in both columns.
       const ledger = yield* sql<{
@@ -1590,7 +1665,7 @@ it.effect("partial reconciliation is recovered on retry without timestamp loss",
         readonly applied_at: string;
       }>`SELECT migration_id, name, created_at, applied_at FROM scient_schema_migrations ORDER BY migration_id`;
 
-      assert.strictEqual(ledger.length, 4);
+      assert.strictEqual(ledger.length, SCIENT_MIGRATION_IDS.length);
       for (let i = 0; i < legacyData.length; i++) {
         const expected = legacyData[i]!;
         const row = ledger[i]!;
@@ -1636,9 +1711,10 @@ it.effect("reconciled ledger with all created_at populated is idempotent on retr
 
       // Retry: reconciliation should be a no-op (backfill finds nothing to do).
       const executed = yield* runScientMigrations(sql);
-      assert.strictEqual(executed.length, 2);
-      assert.strictEqual(executed[0]![0], 3);
-      assert.strictEqual(executed[1]![0], 4);
+      assert.deepStrictEqual(
+        executed.map(([id]) => id),
+        SCIENT_MIGRATIONS_AFTER_BOOTSTRAP,
+      );
 
       // Timestamps unchanged.
       const ledger = yield* sql<{
@@ -1667,7 +1743,7 @@ it.effect("NULL workspace_mode is quarantined without fabrication", () =>
       const executed = yield* runScientMigrations(sql);
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [3, 4],
+        SCIENT_MIGRATIONS_AFTER_BOOTSTRAP,
       );
 
       // Migration 3 is recorded; the row is quarantined, not fabricated.
@@ -1676,7 +1752,7 @@ it.effect("NULL workspace_mode is quarantined without fabrication", () =>
       `;
       assert.deepStrictEqual(
         ledger.map((row) => row.migration_id),
-        [1, 2, 3, 4],
+        SCIENT_MIGRATION_IDS,
       );
 
       const rows = yield* sql<{ readonly thread_id: string }>`
@@ -1713,7 +1789,7 @@ it.effect("manifest has no duplicate migration IDs", () =>
       assert.strictEqual(new Set(ids).size, ids.length);
 
       const executed = yield* runScientMigrations(sql);
-      assert.strictEqual(executed.length, 4);
+      assert.strictEqual(executed.length, SCIENT_MIGRATIONS.length);
     }),
   ),
 );
@@ -1820,7 +1896,10 @@ it.effect("a ledger from a newer build (unknown future ID) fails closed", () =>
       yield* sql`INSERT INTO scient_schema_migrations (migration_id, name) VALUES (2, 'durable-provider-bootstrap')`;
       yield* sql`INSERT INTO scient_schema_migrations (migration_id, name) VALUES (3, 'normalize-active-lineage')`;
       yield* sql`INSERT INTO scient_schema_migrations (migration_id, name) VALUES (4, 'quarantine-invalid-lineage')`;
-      yield* sql`INSERT INTO scient_schema_migrations (migration_id, name) VALUES (5, 'future-migration')`;
+      yield* sql`INSERT INTO scient_schema_migrations (migration_id, name) VALUES (5, 'analysis-run-index')`;
+      yield* sql`INSERT INTO scient_schema_migrations (migration_id, name) VALUES (6, 'analysis-run-projection-state')`;
+      yield* sql`INSERT INTO scient_schema_migrations (migration_id, name) VALUES (7, 'analysis-run-storage-status')`;
+      yield* sql`INSERT INTO scient_schema_migrations (migration_id, name) VALUES (8, 'future-migration')`;
 
       const error = yield* Effect.flip(runScientMigrations(sql));
       if (error._tag !== "ScientMigrationError") {
@@ -1828,18 +1907,18 @@ it.effect("a ledger from a newer build (unknown future ID) fails closed", () =>
       } else {
         assert.strictEqual(error.kind, "BadState");
         assert.isTrue(
-          error.message.includes("unknown migration 5"),
+          error.message.includes("unknown migration 8"),
           `Unexpected message: ${error.message}`,
         );
       }
 
-      // Ledger untouched.
+      // Ledger untouched, including the unknown future entry.
       const ledger = yield* sql<{ readonly migration_id: number }>`
         SELECT migration_id FROM scient_schema_migrations ORDER BY migration_id
       `;
       assert.deepStrictEqual(
         ledger.map((row) => row.migration_id),
-        [1, 2, 3, 4, 5],
+        [1, 2, 3, 4, 5, 6, 7, 8],
       );
     }),
   ),
