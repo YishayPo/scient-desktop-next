@@ -362,7 +362,7 @@ function runtimeStatus(profile: AnalysisRuntimeProfile | null, runtimeLabel: str
       }[profile.verification.status];
       return `${runtimeLabel}${versionLabel} · ${statusLabel}`;
     }
-    return `${runtimeLabel}${versionLabel} · Not verified`;
+    return `${runtimeLabel}${versionLabel}`;
   }
   return profile.detail ?? `${runtimeLabel} is unavailable.`;
 }
