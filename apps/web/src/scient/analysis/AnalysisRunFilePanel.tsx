@@ -28,6 +28,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "~/components/ui/menu";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { analysisEnvironment } from "~/state/analysis";
@@ -740,22 +741,45 @@ export function AnalysisRunFilePanel(props: AnalysisRunFilePanelProps) {
           </Button>
         ) : null}
         {runs.length > 1 ? (
-          <select
-            className="max-w-44 rounded-md border border-input bg-background px-2 py-1 text-xs"
-            value={selectedRun?.receipt.runId ?? ""}
-            onChange={(event) => {
-              setSelectedRunId(event.target.value);
-              setExpanded(true);
-            }}
-            aria-label={`Local ${props.runtimeLabel} run history`}
-          >
-            {runs.map((run) => (
-              <option key={run.receipt.runId} value={run.receipt.runId}>
-                {statusLabel(run, props.runtimeLabel)} ·{" "}
-                {new Date(run.receipt.startedAt).toLocaleTimeString()}
-              </option>
-            ))}
-          </select>
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="max-w-44 gap-1 px-1.5 text-muted-foreground"
+                  aria-label={`Local ${props.runtimeLabel} run history`}
+                >
+                  <span className="truncate">
+                    {selectedRun
+                      ? `${statusLabel(selectedRun, props.runtimeLabel)} · ${new Date(selectedRun.receipt.startedAt).toLocaleTimeString()}`
+                      : "Run history"}
+                  </span>
+                  <ChevronDown className="size-3.5 shrink-0" />
+                </Button>
+              }
+            />
+            <MenuPopup align="end" side="bottom" className="min-w-48">
+              <MenuRadioGroup
+                value={selectedRun?.receipt.runId ?? ""}
+                onValueChange={(runId) => {
+                  setSelectedRunId(runId);
+                  setExpanded(true);
+                }}
+              >
+                {runs.map((run) => (
+                  <MenuRadioItem
+                    key={run.receipt.runId}
+                    value={run.receipt.runId}
+                    className="min-h-7 py-1 sm:text-xs"
+                  >
+                    {statusLabel(run, props.runtimeLabel)} ·{" "}
+                    {new Date(run.receipt.startedAt).toLocaleTimeString()}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </MenuPopup>
+          </Menu>
         ) : null}
         <Button
           size="icon-xs"
